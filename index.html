@@ -126,7 +126,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:-apple-
 .art-wrap{width:min(280px,72vw);height:min(280px,72vw);margin:0 auto 10px;overflow:hidden;border-radius:20px;flex-shrink:0;position:relative}
 .art-slider{display:flex;width:200%;height:100%;will-change:transform}
 #fp-art{width:50%;height:100%;border-radius:20px;object-fit:cover;background:var(--s3);flex-shrink:0;user-select:none;-webkit-user-drag:none;touch-action:none;display:block}
-#fp-notes{width:50%;height:100%;background:var(--s2);border-radius:20px;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px;box-sizing:border-box;font-size:13px;color:var(--dim);line-height:1.6;flex-shrink:0}
+#fp-notes{width:50%;height:100%;background:var(--s2);border-radius:20px;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px;box-sizing:border-box;font-size:13px;color:var(--text);line-height:1.6;flex-shrink:0}
 .art-dots{display:flex;gap:7px;justify-content:center;margin-bottom:18px;flex-shrink:0}
 .art-dot{width:6px;height:6px;border-radius:50%;background:var(--muted);transition:background 0.2s,transform 0.2s}
 .art-dot.on{background:var(--orange);transform:scale(1.25)}
@@ -604,7 +604,7 @@ async function fetchFeed(podId, feedUrl) {
       const pub = item.querySelector('pubDate')?.textContent || '';
       const epNum = item.getElementsByTagNameNS(itns, 'episode')[0]?.textContent?.trim() || '';
       const rawDesc = (item.getElementsByTagNameNS(itns, 'summary')[0] || item.querySelector('description'))?.textContent?.trim() || '';
-      const desc = rawDesc.replace(/<[^>]*>/g,' ').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&nbsp;/g,' ').replace(/\s+/g,' ').trim().slice(0,1000);
+      const desc = rawDesc.replace(/<[^>]*>/g,' ').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&nbsp;/g,' ').replace(/\s+/g,' ').trim();
       return {
         id: `${podId}_${i}`,
         podId,
