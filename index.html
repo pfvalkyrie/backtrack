@@ -60,13 +60,15 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:-apple-
 .lib-chevron{color:var(--muted);font-size:20px;flex-shrink:0}
 
 /* Episodes */
-.ep-item{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--border)}
+.ep-item{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--border);cursor:pointer}
+.ep-item:active{opacity:0.6}
 .ep-art{width:48px;height:48px;border-radius:8px;object-fit:cover;background:var(--s3);flex-shrink:0}
 .ep-info{flex:1;min-width:0}
 .ep-title{font-size:14px;font-weight:600;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.35}
 .ep-meta{font-size:11px;color:var(--dim);margin-top:3px}
 .add-btn{width:40px;height:40px;border-radius:10px;background:var(--s3);border:1px solid var(--border);color:var(--orange);font-size:22px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;line-height:1}
 .add-btn:active{background:var(--s2)}
+.add-btn.in-queue{background:var(--orange);color:#000;border-color:var(--orange);font-size:16px}
 
 /* Queue */
 .q-item{display:flex;align-items:center;gap:10px;background:var(--s1);border-radius:18px;padding:12px;margin-bottom:8px;cursor:pointer}
@@ -552,24 +554,42 @@ function renderEps(podId) {
   const eps = S.lib[podId] || [];
   const el = document.getElementById('ep-list');
   if (!eps.length) { el.innerHTML = '<div class="empty"><p>No episodes found.</p></div>'; return; }
-  el.innerHTML = eps.map((ep, i) => `
-    <div class="ep-item">
+  el.innerHTML = eps.map((ep, i) => {
+    const inQ = S.queue.some(q => q.id === ep.id);
+    return `
+    <div class="ep-item" onclick="tapEpisode(${podId},${i},event)">
       <img class="ep-art" src="${esc(ep.art)}" alt="" loading="lazy">
       <div class="ep-info">
         <div class="ep-title">${esc(ep.title)}</div>
         <div class="ep-meta">${esc(ep.date)}${ep.dur ? ' · '+ft(ep.dur) : ''}</div>
       </div>
-      <button class="add-btn" onclick="addToQueue(${podId},${i})" title="Add to queue">+</button>
-    </div>`).join('');
+      <button class="add-btn${inQ?' in-queue':''}" onclick="addToQueue(${podId},${i},event)" title="${inQ?'In queue':'Add to queue'}">${inQ?'✓':'+'}</button>
+    </div>`;
+  }).join('');
 }
 
-function addToQueue(podId, epIdx) {
+function tapEpisode(podId, epIdx, e) {
+  if (e.target.closest('.add-btn')) return;
   const ep = (S.lib[podId]||[])[epIdx];
   if (!ep) return;
-  if (S.queue.some(q3 => q3.id === ep.id)) { toast('Already in queue'); return; }
+  if (!S.queue.some(q => q.id === ep.id)) S.queue.push({...ep});
+  S.qi = S.queue.findIndex(q => q.id === ep.id);
+  S.pos = S.positions[ep.id] || 0;
+  loadTrack(true);
+  save();
+  renderEps(podId);
+  updateMini();
+}
+
+function addToQueue(podId, epIdx, e) {
+  if (e) e.stopPropagation();
+  const ep = (S.lib[podId]||[])[epIdx];
+  if (!ep) return;
+  if (S.queue.some(q => q.id === ep.id)) { toast('Already in queue'); return; }
   S.queue.push({...ep});
   save();
   updateMini();
+  renderEps(podId);
   toast('Added to queue');
 }
 
