@@ -485,12 +485,13 @@ function showEpisodes(podId) {
 }
 
 async function proxyFetch(feedUrl) {
-  // Try direct first — works if the feed host allows CORS
+  // Try direct first — Megaphone and many hosts allow CORS
   try {
-    const r = await fetch(feedUrl, { signal: AbortSignal.timeout(6000) });
+    const r = await fetch(feedUrl, { signal: AbortSignal.timeout(15000) });
     if (r.ok) return await r.text();
   } catch {}
 
+  // Race all proxies simultaneously — first winner takes it
   const proxies = [
     u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
     u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
@@ -498,19 +499,17 @@ async function proxyFetch(feedUrl) {
     u => `https://thingproxy.freeboard.io/fetch/${u}`,
     u => `https://api.allorigins.win/get?url=${encodeURIComponent(u)}`,
   ];
-  for (const makeUrl of proxies) {
-    try {
-      const r = await fetch(makeUrl(feedUrl), { signal: AbortSignal.timeout(8000) });
-      if (!r.ok) continue;
-      const text = await r.text();
-      // allorigins /get returns JSON — unwrap it
-      if (text.startsWith('{') && text.includes('"contents"')) {
-        return JSON.parse(text).contents;
-      }
-      return text;
-    } catch {}
+
+  async function tryProxy(makeUrl) {
+    const r = await fetch(makeUrl(feedUrl), { signal: AbortSignal.timeout(20000) });
+    if (!r.ok) throw new Error(`${r.status}`);
+    const text = await r.text();
+    if (text.startsWith('{') && text.includes('"contents"')) return JSON.parse(text).contents;
+    if (!text.includes('<')) throw new Error('not xml');
+    return text;
   }
-  throw new Error('All proxies failed');
+
+  return Promise.any(proxies.map(p => tryProxy(p)));
 }
 
 async function fetchFeed(podId, feedUrl) {
