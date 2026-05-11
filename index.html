@@ -105,7 +105,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:-apple-
 .mini-btn svg{display:block}
 
 /* Tab bar */
-#tab-bar{display:flex;background:var(--s1);padding-bottom:max(env(safe-area-inset-bottom,0px),22px);flex-shrink:0}
+#tab-bar{display:flex;background:var(--s1);padding-bottom:max(calc(env(safe-area-inset-bottom,0px) + 12px),34px);flex-shrink:0}
 .tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:10px 4px 8px;cursor:pointer;background:none;border:none;color:var(--muted);font-size:10px;font-weight:600;letter-spacing:0.2px}
 .tab svg{width:22px;height:22px}
 .tab.on{color:var(--orange)}
