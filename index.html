@@ -94,8 +94,10 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:-apple-
 .wp-del{background:none;border:none;color:var(--muted);font-size:22px;padding:4px 6px;cursor:pointer;flex-shrink:0;line-height:1}
 
 /* Mini player */
-#mini-player{background:var(--s1);margin:8px 10px 0;border-radius:18px;padding:10px 12px;flex-shrink:0;display:none;cursor:pointer;box-shadow:0 4px 24px rgba(0,0,0,0.5)}
+#mini-player{background:var(--s1);margin:8px 10px 0;border-radius:18px;padding:10px 12px 13px;flex-shrink:0;display:none;cursor:pointer;box-shadow:0 4px 24px rgba(0,0,0,0.5);position:relative;overflow:hidden}
 #mini-player.on{display:block}
+#mini-prog-track{position:absolute;bottom:0;left:0;right:0;height:3px;background:var(--s3)}
+#mini-prog-fill{height:100%;background:var(--orange);width:0%}
 .mini-inner{display:flex;align-items:center;gap:12px}
 #mini-art{width:46px;height:46px;border-radius:12px;object-fit:cover;background:var(--s3);flex-shrink:0}
 .mini-txt{flex:1;min-width:0}
@@ -163,6 +165,10 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:-apple-
 .empty p{font-size:15px;line-height:1.4}
 .loading-msg{text-align:center;padding:32px;color:var(--dim);font-size:14px}
 
+/* Pull-to-refresh */
+#ptr-indicator{text-align:center;padding:0 0 8px;font-size:12px;color:var(--dim);flex-shrink:0;height:0;overflow:hidden;transition:height 0.2s;display:flex;align-items:center;justify-content:center;gap:6px}
+#ptr-indicator.visible{height:36px}
+
 /* Filter */
 .filter-row{padding:0 16px 10px;flex-shrink:0}
 .filter-row input{width:100%;background:var(--s2);border:1.5px solid var(--border);border-radius:13px;color:var(--text);font-size:16px;padding:11px 14px;outline:none;-webkit-appearance:none;touch-action:manipulation}
@@ -210,6 +216,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:-apple-
     <div class="filter-row">
       <input id="ep-filter" type="text" inputmode="search" placeholder="Filter episodes…" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false">
     </div>
+    <div id="ptr-indicator">↓ Pull to refresh</div>
     <div class="scroll-area" id="ep-list"></div>
   </div>
 
@@ -245,6 +252,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:-apple-
         </button>
       </div>
     </div>
+    <div id="mini-prog-track"><div id="mini-prog-fill"></div></div>
   </div>
 
   <!-- TAB BAR -->
@@ -801,6 +809,45 @@ function endEpSwipe(e) {
 vEp.addEventListener('touchend', endEpSwipe, { passive: true });
 vEp.addEventListener('touchcancel', endEpSwipe, { passive: true });
 
+// ── Pull-to-refresh (episodes) ────────────────────────────────────────────────
+const epScrollEl = document.getElementById('ep-list');
+const ptrIndicator = document.getElementById('ptr-indicator');
+const PTR_THRESHOLD = 60;
+let ptr = null;
+
+epScrollEl.addEventListener('touchstart', e => {
+  if (epScrollEl.scrollTop > 0) return;
+  ptr = { startY: e.touches[0].clientY, triggered: false };
+}, { passive: true });
+
+epScrollEl.addEventListener('touchmove', e => {
+  if (!ptr) return;
+  const dy = e.touches[0].clientY - ptr.startY;
+  if (dy <= 0) { ptr = null; ptrIndicator.classList.remove('visible'); ptrIndicator.textContent = '↓ Pull to refresh'; return; }
+  const pct = Math.min(dy / PTR_THRESHOLD, 1);
+  if (dy >= PTR_THRESHOLD && !ptr.triggered) {
+    ptrIndicator.textContent = '↑ Release to refresh';
+  } else if (dy < PTR_THRESHOLD) {
+    ptrIndicator.textContent = '↓ Pull to refresh';
+  }
+  ptrIndicator.classList.toggle('visible', dy > 16);
+}, { passive: true });
+
+epScrollEl.addEventListener('touchend', async () => {
+  if (!ptr) return;
+  const triggered = ptrIndicator.textContent.includes('Release');
+  ptr = null;
+  if (!triggered) { ptrIndicator.classList.remove('visible'); return; }
+  ptrIndicator.textContent = '⟳ Refreshing…';
+  const pod = S.subs.find(s => s.id === episodePodcastId);
+  if (pod) {
+    await fetchFeed(episodePodcastId, pod.feedUrl);
+    renderEps(episodePodcastId);
+  }
+  ptrIndicator.classList.remove('visible');
+  ptrIndicator.textContent = '↓ Pull to refresh';
+}, { passive: true });
+
 // ── Audio ─────────────────────────────────────────────────────────────────────
 function loadTrack(play = false) {
   const ep = S.queue[S.qi];
@@ -918,6 +965,7 @@ function updateProgress() {
   document.getElementById('prog-thumb').style.left = pct + '%';
   document.getElementById('t-cur').textContent = ft(audio.currentTime);
   document.getElementById('t-rem').textContent = audio.duration ? '-'+ft(audio.duration - audio.currentTime) : '-0:00';
+  document.getElementById('mini-prog-fill').style.width = pct + '%';
 }
 
 // ── Full player UI ────────────────────────────────────────────────────────────
@@ -1173,6 +1221,7 @@ function renderWaypoints() {
     const pct = ep.dur ? S.pos / ep.dur * 100 : 0;
     document.getElementById('prog-fill').style.width = pct + '%';
     document.getElementById('prog-thumb').style.left = pct + '%';
+    document.getElementById('mini-prog-fill').style.width = pct + '%';
     document.getElementById('t-cur').textContent = ft(S.pos);
     document.getElementById('t-rem').textContent = ep.dur ? '-'+ft(ep.dur - S.pos) : '-0:00';
   }
