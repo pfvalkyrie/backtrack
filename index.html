@@ -165,6 +165,9 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:-apple-
 .empty p{font-size:15px;line-height:1.4}
 .loading-msg{text-align:center;padding:32px;color:var(--dim);font-size:14px}
 
+/* Episode description */
+#fp-desc{font-size:13px;color:var(--dim);line-height:1.6;margin-top:28px;padding-bottom:8px;white-space:pre-line;display:none}
+
 /* Pull-to-refresh */
 #ptr-indicator{text-align:center;padding:0 0 8px;font-size:12px;color:var(--dim);flex-shrink:0;height:0;overflow:hidden;transition:height 0.2s;display:flex;align-items:center;justify-content:center;gap:6px}
 #ptr-indicator.visible{height:36px}
@@ -341,6 +344,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:-apple-
     <button class="wp-action" id="fp-mark-wp">⚑ Waypoint</button>
     <button class="wp-action" id="fp-sleep-btn">⏾ Sleep</button>
   </div>
+  <div id="fp-desc"></div>
   </div><!-- #fp-inner -->
 </div>
 
@@ -587,6 +591,8 @@ async function fetchFeed(podId, feedUrl) {
                   item.querySelector('duration')?.textContent || '';
       const pub = item.querySelector('pubDate')?.textContent || '';
       const epNum = item.getElementsByTagNameNS(itns, 'episode')[0]?.textContent?.trim() || '';
+      const rawDesc = (item.getElementsByTagNameNS(itns, 'summary')[0] || item.querySelector('description'))?.textContent?.trim() || '';
+      const desc = rawDesc.replace(/<[^>]*>/g,' ').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&nbsp;/g,' ').replace(/\s+/g,' ').trim().slice(0,1000);
       return {
         id: `${podId}_${i}`,
         podId,
@@ -597,6 +603,7 @@ async function fetchFeed(podId, feedUrl) {
         dur: parseDur(dur.trim()),
         date: pub ? new Date(pub).toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'}) : '',
         epNum,
+        desc,
       };
     }).filter(Boolean);
     S.lib[podId] = eps;
@@ -1043,6 +1050,9 @@ function updateFP() {
   document.getElementById('fp-title').textContent = ep.title;
   document.getElementById('fp-show').textContent = ep.podName;
   document.querySelectorAll('.spd-btn').forEach(b => b.classList.toggle('on', parseFloat(b.dataset.s) === S.speed));
+  const descEl = document.getElementById('fp-desc');
+  descEl.textContent = ep.desc || '';
+  descEl.style.display = ep.desc ? '' : 'none';
   updateProgress();
 }
 
@@ -1085,16 +1095,14 @@ function goToCurrentInQueue() {
 document.getElementById('fp-title').addEventListener('click', goToCurrentInQueue);
 document.getElementById('fp-show').addEventListener('click', goToCurrentInQueue);
 
-// Drag-to-dismiss: only starts from the topbar so it doesn't fight content scrolling
+// Drag-to-dismiss: topbar and artwork both trigger it
 let drag = null;
-const fpTopbar = document.getElementById('fp-topbar');
 
-fpTopbar.addEventListener('touchstart', e => {
+function onDragStart(e) {
   drag = { startY: e.touches[0].clientY, lastY: e.touches[0].clientY, lastT: Date.now(), vel: 0 };
   fullPlayer.style.transition = 'none';
-}, {passive: true});
-
-fpTopbar.addEventListener('touchmove', e => {
+}
+function onDragMove(e) {
   if (!drag) return;
   const dy = e.touches[0].clientY - drag.startY;
   if (dy > 0) {
@@ -1104,16 +1112,25 @@ fpTopbar.addEventListener('touchmove', e => {
     drag.lastY = e.touches[0].clientY;
     drag.lastT = Date.now();
   }
-}, {passive: true});
-
-fpTopbar.addEventListener('touchend', e => {
+}
+function onDragEnd(e) {
   if (!drag) return;
   const dy = e.changedTouches[0].clientY - drag.startY;
   fullPlayer.style.transition = '';
   fullPlayer.style.transform = '';
   if (dy > 100 || drag.vel > 0.4) closePlayer();
   drag = null;
-}, {passive: true});
+}
+
+const fpTopbar = document.getElementById('fp-topbar');
+fpTopbar.addEventListener('touchstart', onDragStart, {passive: true});
+fpTopbar.addEventListener('touchmove', onDragMove, {passive: true});
+fpTopbar.addEventListener('touchend', onDragEnd, {passive: true});
+
+const fpArt = document.getElementById('fp-art');
+fpArt.addEventListener('touchstart', onDragStart, {passive: true});
+fpArt.addEventListener('touchmove', onDragMove, {passive: true});
+fpArt.addEventListener('touchend', onDragEnd, {passive: true});
 
 // Scrubbing requires deliberate horizontal intent — vertical swipes pass through
 progTrack.addEventListener('touchstart', e => {
