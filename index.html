@@ -1051,8 +1051,9 @@ function updateFP() {
   document.getElementById('fp-show').textContent = ep.podName;
   document.querySelectorAll('.spd-btn').forEach(b => b.classList.toggle('on', parseFloat(b.dataset.s) === S.speed));
   const descEl = document.getElementById('fp-desc');
-  descEl.textContent = ep.desc || '';
-  descEl.style.display = ep.desc ? '' : 'none';
+  const desc = ep.desc || (S.lib[ep.podId] || []).find(e => e.id === ep.id)?.desc || '';
+  descEl.textContent = desc;
+  descEl.style.display = desc ? '' : 'none';
   updateProgress();
 }
 
