@@ -122,7 +122,14 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:-apple-
 .drag-handle{width:40px;height:5px;background:var(--border);border-radius:3px;cursor:pointer}
 .fp-queue-btn{position:absolute;right:0;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--dim);padding:6px;cursor:pointer;display:flex;align-items:center}
 .fp-queue-btn:active{color:var(--orange)}
-#fp-art{width:min(280px,72vw);height:min(280px,72vw);border-radius:20px;object-fit:cover;background:var(--s3);margin:0 auto 24px;display:block;flex-shrink:0;user-select:none;-webkit-user-drag:none;touch-action:none}
+/* Art / notes carousel */
+.art-wrap{width:min(280px,72vw);height:min(280px,72vw);margin:0 auto 10px;overflow:hidden;border-radius:20px;flex-shrink:0;position:relative}
+.art-slider{display:flex;width:200%;height:100%;will-change:transform}
+#fp-art{width:50%;height:100%;border-radius:20px;object-fit:cover;background:var(--s3);flex-shrink:0;user-select:none;-webkit-user-drag:none;touch-action:none;display:block}
+#fp-notes{width:50%;height:100%;background:var(--s2);border-radius:20px;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px;box-sizing:border-box;font-size:13px;color:var(--dim);line-height:1.6;flex-shrink:0}
+.art-dots{display:flex;gap:7px;justify-content:center;margin-bottom:18px;flex-shrink:0}
+.art-dot{width:6px;height:6px;border-radius:50%;background:var(--muted);transition:background 0.2s,transform 0.2s}
+.art-dot.on{background:var(--orange);transform:scale(1.25)}
 #fp-title{font-size:18px;font-weight:800;text-align:center;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-bottom:4px;letter-spacing:-0.3px;cursor:pointer}
 #fp-title:active{opacity:0.6}
 #fp-show{font-size:13px;color:var(--dim);text-align:center;margin-bottom:22px;cursor:pointer}
@@ -164,9 +171,6 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:-apple-
 .empty .ico{font-size:44px;margin-bottom:12px}
 .empty p{font-size:15px;line-height:1.4}
 .loading-msg{text-align:center;padding:32px;color:var(--dim);font-size:14px}
-
-/* Episode description */
-#fp-desc{font-size:13px;color:var(--dim);line-height:1.6;margin-top:28px;padding-bottom:8px;white-space:pre-line;display:none}
 
 /* Pull-to-refresh */
 #ptr-indicator{text-align:center;padding:0 0 8px;font-size:12px;color:var(--dim);flex-shrink:0;height:0;overflow:hidden;transition:height 0.2s;display:flex;align-items:center;justify-content:center;gap:6px}
@@ -301,7 +305,16 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:-apple-
     </button>
   </div>
   <div id="fp-inner">
-  <img id="fp-art" src="" alt="" draggable="false">
+  <div class="art-wrap">
+    <div class="art-slider" id="art-slider">
+      <img id="fp-art" src="" alt="" draggable="false">
+      <div id="fp-notes"></div>
+    </div>
+  </div>
+  <div class="art-dots">
+    <span class="art-dot on" id="art-dot-0"></span>
+    <span class="art-dot" id="art-dot-1"></span>
+  </div>
   <div id="fp-title">Episode Title</div>
   <div id="fp-show">Podcast Name</div>
 
@@ -344,7 +357,6 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:-apple-
     <button class="wp-action" id="fp-mark-wp">⚑ Waypoint</button>
     <button class="wp-action" id="fp-sleep-btn">⏾ Sleep</button>
   </div>
-  <div id="fp-desc"></div>
   </div><!-- #fp-inner -->
 </div>
 
@@ -1050,10 +1062,9 @@ function updateFP() {
   document.getElementById('fp-title').textContent = ep.title;
   document.getElementById('fp-show').textContent = ep.podName;
   document.querySelectorAll('.spd-btn').forEach(b => b.classList.toggle('on', parseFloat(b.dataset.s) === S.speed));
-  const descEl = document.getElementById('fp-desc');
   const desc = ep.desc || (S.lib[ep.podId] || []).find(e => e.id === ep.id)?.desc || '';
-  descEl.textContent = desc;
-  descEl.style.display = desc ? '' : 'none';
+  document.getElementById('fp-notes').textContent = desc || 'No show notes available.';
+  setArtPanel(false, false);
   updateProgress();
 }
 
@@ -1128,10 +1139,47 @@ fpTopbar.addEventListener('touchstart', onDragStart, {passive: true});
 fpTopbar.addEventListener('touchmove', onDragMove, {passive: true});
 fpTopbar.addEventListener('touchend', onDragEnd, {passive: true});
 
-const fpArt = document.getElementById('fp-art');
-fpArt.addEventListener('touchstart', onDragStart, {passive: true});
-fpArt.addEventListener('touchmove', onDragMove, {passive: true});
-fpArt.addEventListener('touchend', onDragEnd, {passive: true});
+// Art ↔ notes swipe carousel
+let artSwipe = null, showingNotes = false;
+const artSlider = document.getElementById('art-slider');
+const artWrap = artSlider.parentElement;
+
+function setArtPanel(showNotes, animate = true) {
+  artSlider.style.transition = animate ? 'transform 0.35s cubic-bezier(0.32,0.72,0,1)' : 'none';
+  artSlider.style.transform = showNotes ? 'translateX(-50%)' : 'translateX(0)';
+  showingNotes = showNotes;
+  document.getElementById('art-dot-0').classList.toggle('on', !showNotes);
+  document.getElementById('art-dot-1').classList.toggle('on', showNotes);
+}
+
+artWrap.addEventListener('touchstart', e => {
+  artSwipe = { startX: e.touches[0].clientX, startY: e.touches[0].clientY, active: false };
+  artSlider.style.transition = 'none';
+}, { passive: true });
+
+artWrap.addEventListener('touchmove', e => {
+  if (!artSwipe) return;
+  const dx = e.touches[0].clientX - artSwipe.startX;
+  const dy = Math.abs(e.touches[0].clientY - artSwipe.startY);
+  if (!artSwipe.active) {
+    if (Math.abs(dx) < 8 && dy < 8) return;
+    if (dy > Math.abs(dx)) { artSwipe = null; artSlider.style.transition = ''; return; }
+    artSwipe.active = true;
+  }
+  const base = showingNotes ? -artWrap.offsetWidth : 0;
+  const clamped = Math.max(-artWrap.offsetWidth, Math.min(0, base + dx));
+  artSlider.style.transform = `translateX(${clamped}px)`;
+}, { passive: true });
+
+artWrap.addEventListener('touchend', e => {
+  if (!artSwipe?.active) { artSwipe = null; artSlider.style.transition = ''; return; }
+  const dx = e.changedTouches[0].clientX - artSwipe.startX;
+  artSwipe = null;
+  const threshold = artWrap.offsetWidth * 0.25;
+  if (!showingNotes && dx < -threshold) setArtPanel(true);
+  else if (showingNotes && dx > threshold) setArtPanel(false);
+  else setArtPanel(showingNotes);
+}, { passive: true });
 
 // Scrubbing requires deliberate horizontal intent — vertical swipes pass through
 progTrack.addEventListener('touchstart', e => {
