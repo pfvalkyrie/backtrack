@@ -83,6 +83,15 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:-apple-
 .q-del{background:none;border:none;color:var(--muted);font-size:22px;padding:4px 6px;cursor:pointer;flex-shrink:0;line-height:1}
 .q-del:active{color:var(--text)}
 .q-drag{background:none;border:none;color:var(--muted);font-size:20px;padding:4px 4px;flex-shrink:0;touch-action:none;line-height:1;cursor:grab}
+.vhead-action{background:none;border:none;color:var(--orange);font-size:15px;font-weight:600;padding:4px 8px;cursor:pointer;margin-left:auto;flex-shrink:0}
+.q-check{width:22px;height:22px;border-radius:50%;border:2px solid var(--muted);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:13px;color:transparent}
+.q-item.q-sel .q-check{border-color:var(--orange);background:var(--orange);color:#000}
+#queue-edit-bar{display:none;gap:10px;padding:10px 16px 10px;flex-shrink:0}
+#queue-edit-bar.visible{display:flex}
+.qeb-btn{flex:1;padding:12px 8px;border-radius:14px;border:none;font-size:15px;font-weight:600;cursor:pointer}
+.qeb-remove{background:var(--orange);color:#000}
+.qeb-remove:disabled{opacity:0.35}
+.qeb-clear{background:var(--s2);color:var(--text)}
 
 /* Waypoints */
 .wp-item{display:flex;align-items:center;gap:12px;background:var(--s1);border-radius:18px;padding:14px;margin-bottom:10px;cursor:pointer}
@@ -284,8 +293,15 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:-apple-
 
   <!-- QUEUE VIEW -->
   <div id="v-queue" class="view">
-    <div class="vhead"><h1>Queue</h1></div>
+    <div class="vhead">
+      <h1>Queue</h1>
+      <button class="vhead-action" id="queue-edit-btn" onclick="toggleQueueEdit()">Edit</button>
+    </div>
     <div class="scroll-area" id="queue-list"></div>
+    <div id="queue-edit-bar">
+      <button class="qeb-btn qeb-remove" id="qeb-remove" disabled onclick="removeQueueSelected()">Remove</button>
+      <button class="qeb-btn qeb-clear" onclick="clearQueue()">Clear All</button>
+    </div>
   </div>
 
   <!-- WAYPOINTS VIEW -->
@@ -547,6 +563,12 @@ function nav(view) {
   }
 
   if (view === currentView) return;
+  if (currentView === 'queue' && queueEditMode) {
+    queueEditMode = false;
+    queueSelected.clear();
+    document.getElementById('queue-edit-btn').textContent = 'Edit';
+    document.getElementById('queue-edit-bar').classList.remove('visible');
+  }
   currentView = view;
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t.dataset.v === view));
@@ -922,25 +944,84 @@ function addToQueue(podId, epIdx, e) {
 }
 
 // ── Queue ─────────────────────────────────────────────────────────────────────
+let queueEditMode = false;
+let queueSelected = new Set();
+
+function toggleQueueEdit() {
+  queueEditMode = !queueEditMode;
+  if (!queueEditMode) queueSelected.clear();
+  document.getElementById('queue-edit-btn').textContent = queueEditMode ? 'Done' : 'Edit';
+  const bar = document.getElementById('queue-edit-bar');
+  bar.classList.toggle('visible', queueEditMode);
+  renderQueue();
+}
+
+function toggleQueueSelect(i) {
+  if (queueSelected.has(i)) queueSelected.delete(i);
+  else queueSelected.add(i);
+  const n = queueSelected.size;
+  const btn = document.getElementById('qeb-remove');
+  btn.textContent = n ? `Remove (${n})` : 'Remove';
+  btn.disabled = n === 0;
+  const item = document.querySelector(`#queue-list .q-item[data-qi="${i}"]`);
+  if (item) item.classList.toggle('q-sel', queueSelected.has(i));
+}
+
+function removeQueueSelected() {
+  const indices = Array.from(queueSelected).sort((a, b) => b - a);
+  let removedBeforeCurrent = 0;
+  for (const i of indices) {
+    if (i < S.qi) removedBeforeCurrent++;
+    if (i === S.qi) { audio.pause(); audio.src = ''; }
+    S.queue.splice(i, 1);
+  }
+  S.qi = Math.max(0, S.qi - removedBeforeCurrent);
+  if (S.qi >= S.queue.length) S.qi = Math.max(0, S.queue.length - 1);
+  save();
+  queueSelected.clear();
+  if (!S.queue.length) { queueEditMode = false; document.getElementById('queue-edit-btn').textContent = 'Edit'; document.getElementById('queue-edit-bar').classList.remove('visible'); }
+  renderQueue();
+  updateMini();
+}
+
+function clearQueue() {
+  audio.pause();
+  audio.src = '';
+  S.queue = [];
+  S.qi = 0;
+  save();
+  queueSelected.clear();
+  queueEditMode = false;
+  document.getElementById('queue-edit-btn').textContent = 'Edit';
+  document.getElementById('queue-edit-bar').classList.remove('visible');
+  renderQueue();
+  updateMini();
+}
+
 function renderQueue() {
   const el = document.getElementById('queue-list');
+  const editBtn = document.getElementById('queue-edit-btn');
   if (!S.queue.length) {
     el.innerHTML = '<div class="empty"><div class="ico">🎵</div><p>Queue is empty.<br>Browse episodes to add them.</p></div>';
+    if (editBtn) editBtn.style.display = 'none';
     return;
   }
+  if (editBtn) editBtn.style.display = '';
   el.innerHTML = S.queue.map((ep, i) => {
     const meta = [ep.epNum ? `Ep ${ep.epNum}` : '', ep.date].filter(Boolean).join(' · ');
+    const sel = queueEditMode && queueSelected.has(i);
     return `
-    <div class="q-item${i===S.qi?' now':''}" data-qi="${i}" onclick="playAt(${i},event)">
-      <div class="q-num">${i===S.qi ? '▶' : i+1}</div>
+    <div class="q-item${i===S.qi&&!queueEditMode?' now':''}${sel?' q-sel':''}" data-qi="${i}" onclick="${queueEditMode ? `toggleQueueSelect(${i})` : `playAt(${i},event)`}">
+      ${queueEditMode
+        ? `<div class="q-check">${sel ? '✓' : ''}</div>`
+        : `<div class="q-num">${i===S.qi ? '▶' : i+1}</div>`}
       <img class="q-art" src="${esc(ep.art)}" alt="" loading="lazy">
       <div class="q-info">
         <div class="q-title">${esc(ep.title)}</div>
         <div class="q-show">${esc(ep.podName)}</div>
         ${meta ? `<div class="q-meta">${esc(meta)}</div>` : ''}
       </div>
-      <button class="q-drag" aria-label="Reorder">⠿</button>
-      <button class="q-del" onclick="delFromQueue(event,${i})">×</button>
+      ${queueEditMode ? '' : `<button class="q-drag" aria-label="Reorder">⠿</button><button class="q-del" onclick="delFromQueue(event,${i})">×</button>`}
     </div>`;
   }).join('');
 }
