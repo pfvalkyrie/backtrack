@@ -2,6 +2,10 @@
 
 Single-file iPhone Safari web app. Dark theme (black + orange). Hosted on GitHub Pages.
 
+## Purpose
+
+Backtrack is a mobile-first podcast player built around recovery-oriented listening. The sleep timer saves a waypoint when it starts, making it easy to return to the point where listening drifted off. Manual waypoints, persistent positions, queue controls, and quick scrubbing are designed for listeners who often need to retrace and resume.
+
 **Source file:** `index.html` (everything inline — HTML, CSS, JS, no build step)  
 
 ---
