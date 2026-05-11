@@ -491,7 +491,7 @@ function pad(n) { return String(n).padStart(2,'0'); }
 function esc(s) {
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
-function q(s) { return String(s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
+function q(s) { return String(s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;'); }
 
 let toastTimer;
 function toast(msg) {
