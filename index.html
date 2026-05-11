@@ -173,8 +173,8 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:-apple-
 .loading-msg{text-align:center;padding:32px;color:var(--dim);font-size:14px}
 
 /* Pull-to-refresh */
-#ptr-indicator{text-align:center;padding:0 0 8px;font-size:12px;color:var(--dim);flex-shrink:0;height:0;overflow:hidden;transition:height 0.2s;display:flex;align-items:center;justify-content:center;gap:6px}
-#ptr-indicator.visible{height:36px}
+#ptr-indicator{text-align:center;font-size:12px;color:var(--dim);flex-shrink:0;max-height:0;overflow:hidden;transition:max-height 0.2s;display:flex;align-items:center;justify-content:center;gap:6px}
+#ptr-indicator.visible{max-height:40px}
 
 /* Filter */
 .filter-row{padding:0 16px 10px;flex-shrink:0}
