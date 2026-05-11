@@ -676,11 +676,27 @@ document.getElementById('qs-end').addEventListener('click', () => {
   toast('Added to end');
 });
 
+function removeFromQueue(ep) {
+  const i = S.queue.findIndex(q => q.id === ep.id);
+  if (i === -1) return;
+  const wasCurrent = i === S.qi;
+  if (wasCurrent) { audio.pause(); audio.src = ''; }
+  S.queue.splice(i, 1);
+  if (i < S.qi) S.qi--;
+  if (S.qi >= S.queue.length) S.qi = Math.max(0, S.queue.length - 1);
+  save();
+  updateMini();
+  if (episodePodcastId !== null) renderEps(episodePodcastId);
+  if (!S.queue.length) { document.getElementById('full-player').classList.remove('on'); }
+  else if (wasCurrent) updateFP();
+  toast('Removed from queue');
+}
+
 function addToQueue(podId, epIdx, e) {
   if (e) e.stopPropagation();
   const ep = (S.lib[podId]||[])[epIdx];
   if (!ep) return;
-  if (S.queue.some(q => q.id === ep.id)) { toast('Already in queue'); return; }
+  if (S.queue.some(q => q.id === ep.id)) { removeFromQueue(ep); return; }
   showQueueSheet(ep);
 }
 
