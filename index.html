@@ -880,11 +880,11 @@ async function fetchFeed(podId, feedUrl, podMeta = {}, persist = true) {
     if (currentBrowsePod?.id === podId) {
       document.getElementById('ph-count').textContent = `${eps.length} episodes`;
     }
-    // Re-trigger chapters if the currently playing episode is from this podcast
+    // Re-trigger chapters for the playing episode when feed is refreshed externally
     const curEp = S.queue[S.qi];
-    if (curEp?.podId === podId) {
+    if (curEp?.podId === podId && !chaptersLoading) {
       const freshEp = eps.find(e => e.id === curEp.id);
-      if (freshEp?.chaptersUrl) { chaptersEpId = null; loadChapters(freshEp); }
+      if (freshEp) { chaptersEpId = null; loadChapters(freshEp); }
     }
   } catch(e) {
     console.error('Feed error', e);
@@ -1630,31 +1630,43 @@ async function fetchJson(url) {
 }
 
 async function loadChapters(ep) {
-  // Queue entries may be stale copies — resolve chaptersUrl from library if missing
-  const resolvedUrl = ep?.chaptersUrl
-    || (getEps(ep?.podId || 0)).find(e => e.id === ep?.id)?.chaptersUrl
-    || '';
   const chDiv = document.getElementById('fp-chapters');
   const dot0 = document.getElementById('art-dot-0');
-  if (!resolvedUrl) {
-    // Try fetching the subscribed feed to get chaptersUrl — only once (chaptersLoading guards recursion)
-    if (ep?.podId && !chaptersLoading) {
-      const sub = S.subs.find(s => s.id === ep.podId);
-      if (sub?.feedUrl) {
-        chaptersLoading = true;
-        chDiv.innerHTML = '<div style="color:var(--dim);font-size:13px;padding:8px 4px">Loading chapters…</div>';
-        dot0.style.display = '';
-        try { await fetchFeed(ep.podId, sub.feedUrl, sub, true); } catch {}
-        chaptersLoading = false;
-        return; // fetchFeed re-calls loadChapters with fresh ep data
-      }
+
+  // ?? not || : '' means "fetched, no chapters"; undefined means "never fetched"
+  let resolvedUrl = ep?.chaptersUrl ?? (getEps(ep?.podId || 0)).find(e => e.id === ep?.id)?.chaptersUrl;
+
+  // If never fetched, try a lazy feed refresh for subscribed podcasts (once — chaptersLoading guards recursion)
+  if (resolvedUrl === undefined && ep?.podId && !chaptersLoading) {
+    const sub = S.subs.find(s => s.id === ep.podId);
+    if (sub?.feedUrl) {
+      chaptersLoading = true;
+      chDiv.innerHTML = '<div style="color:var(--dim);font-size:13px;padding:8px 4px">Loading chapters…</div>';
+      dot0.style.display = '';
+      try { await fetchFeed(ep.podId, sub.feedUrl, sub, true); } catch {}
+      chaptersLoading = false;
+      // If fetchFeed's re-trigger already loaded chapters (external call path), we're done
+      if (chaptersEpId === ep.id) return;
+      // Otherwise read chaptersUrl from the freshly saved library
+      resolvedUrl = (getEps(ep.podId)).find(e => e.id === ep.id)?.chaptersUrl ?? '';
+    } else {
+      resolvedUrl = '';
     }
+  } else if (resolvedUrl === undefined) {
+    resolvedUrl = '';
+  }
+
+  // No chapters for this episode
+  if (!resolvedUrl) {
     currentChapters = []; chaptersEpId = null; lastHighlightedChapter = -1;
     dot0.style.display = 'none';
     chDiv.innerHTML = '';
     return;
   }
+
+  // Already loaded for this episode
   if (chaptersEpId === ep.id) return;
+
   currentChapters = []; chaptersEpId = ep.id; lastHighlightedChapter = -1;
   dot0.style.display = '';
   chDiv.innerHTML = '<div style="color:var(--dim);font-size:13px;padding:8px 4px">Loading chapters…</div>';
