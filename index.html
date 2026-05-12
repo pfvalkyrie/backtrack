@@ -860,6 +860,7 @@ async function fetchFeed(podId, feedUrl, podMeta = {}, persist = true) {
       const chaptersNode = item.getElementsByTagNameNS('https://podcastindex.org/namespace/1.0','chapters')[0]
         || Array.from(item.getElementsByTagName('*')).find(n => n.localName === 'chapters' && n.hasAttribute('url'));
       const chaptersUrl = chaptersNode?.getAttribute('url') || '';
+      if (i === 0) console.log('[chapters] feed item[0] chaptersNode=', chaptersNode, 'chaptersUrl=', chaptersUrl);
       return {
         id: `${podId}_${i}`,
         podId,
@@ -1618,15 +1619,28 @@ fpTopbar.addEventListener('touchend', onDragEnd, {passive: true});
 let currentChapters = [], chaptersEpId = null, lastHighlightedChapter = -1, chaptersLoading = false;
 
 async function fetchJson(url) {
+  async function tryUrl(u) {
+    const r = await fetch(u, { signal: AbortSignal.timeout(15000) });
+    if (!r.ok) throw new Error(r.status);
+    const text = await r.text();
+    // allorigins /get wraps response in {"contents":"..."}
+    if (text.trimStart().startsWith('{') && text.includes('"contents"')) {
+      const d = JSON.parse(text);
+      if (d.contents) return JSON.parse(d.contents);
+    }
+    return JSON.parse(text);
+  }
+  const enc = encodeURIComponent(url);
   try {
-    const r = await fetch(url, { signal: AbortSignal.timeout(10000) });
-    if (r.ok) return await r.json();
-  } catch {}
-  try {
-    const r = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`, { signal: AbortSignal.timeout(15000) });
-    if (r.ok) return await r.json();
-  } catch {}
-  throw new Error('chapters fetch failed');
+    return await Promise.any([
+      tryUrl(url),
+      tryUrl(`https://corsproxy.io/?${enc}`),
+      tryUrl(`https://api.allorigins.win/raw?url=${enc}`),
+      tryUrl(`https://api.codetabs.com/v1/proxy?quest=${enc}`),
+    ]);
+  } catch {
+    throw new Error('chapters fetch failed');
+  }
 }
 
 async function loadChapters(ep) {
@@ -1635,20 +1649,23 @@ async function loadChapters(ep) {
 
   // ?? not || : '' means "fetched, no chapters"; undefined means "never fetched"
   let resolvedUrl = ep?.chaptersUrl ?? (getEps(ep?.podId || 0)).find(e => e.id === ep?.id)?.chaptersUrl;
+  console.log('[chapters] loadChapters', ep?.id, 'ep.chaptersUrl=', ep?.chaptersUrl, 'library=', (getEps(ep?.podId||0)).find(e=>e.id===ep?.id)?.chaptersUrl, '→ resolvedUrl=', resolvedUrl);
 
   // If never fetched, try a lazy feed refresh for subscribed podcasts (once — chaptersLoading guards recursion)
   if (resolvedUrl === undefined && ep?.podId && !chaptersLoading) {
     const sub = S.subs.find(s => s.id === ep.podId);
+    console.log('[chapters] lazy fetch — sub=', sub?.name, 'feedUrl=', sub?.feedUrl);
     if (sub?.feedUrl) {
       chaptersLoading = true;
       chDiv.innerHTML = '<div style="color:var(--dim);font-size:13px;padding:8px 4px">Loading chapters…</div>';
       dot0.style.display = '';
-      try { await fetchFeed(ep.podId, sub.feedUrl, sub, true); } catch {}
+      try { await fetchFeed(ep.podId, sub.feedUrl, sub, true); } catch(e) { console.warn('[chapters] fetchFeed error', e); }
       chaptersLoading = false;
       // If fetchFeed's re-trigger already loaded chapters (external call path), we're done
       if (chaptersEpId === ep.id) return;
       // Otherwise read chaptersUrl from the freshly saved library
       resolvedUrl = (getEps(ep.podId)).find(e => e.id === ep.id)?.chaptersUrl ?? '';
+      console.log('[chapters] after lazy fetch resolvedUrl=', resolvedUrl);
     } else {
       resolvedUrl = '';
     }
@@ -1658,24 +1675,29 @@ async function loadChapters(ep) {
 
   // No chapters for this episode
   if (!resolvedUrl) {
+    console.log('[chapters] no chaptersUrl — podcast does not have chapters');
     currentChapters = []; chaptersEpId = null; lastHighlightedChapter = -1;
     dot0.style.display = 'none';
-    chDiv.innerHTML = '';
+    chDiv.innerHTML = '<div style="color:var(--dim);font-size:13px;padding:8px 4px">No chapters for this episode.</div>';
+    updateCarouselBtns();
     return;
   }
 
   // Already loaded for this episode
-  if (chaptersEpId === ep.id) return;
+  if (chaptersEpId === ep.id) { console.log('[chapters] already loaded'); return; }
 
+  console.log('[chapters] fetching JSON from', resolvedUrl);
   currentChapters = []; chaptersEpId = ep.id; lastHighlightedChapter = -1;
   dot0.style.display = '';
   chDiv.innerHTML = '<div style="color:var(--dim);font-size:13px;padding:8px 4px">Loading chapters…</div>';
   try {
     const json = await fetchJson(resolvedUrl);
+    console.log('[chapters] JSON received, chapters count=', json.chapters?.length);
     currentChapters = (json.chapters || []).filter(c => typeof c.startTime === 'number');
     renderChapters();
     updateCarouselBtns();
-  } catch {
+  } catch(e) {
+    console.warn('[chapters] fetchJson failed', e);
     chDiv.innerHTML = '<div style="color:var(--dim);font-size:13px;padding:8px 4px">Couldn\'t load chapters.</div>';
   }
 }
@@ -1799,7 +1821,7 @@ artWrap.addEventListener('touchend', e => {
     fullPlayer.style.transform = '';
     const threshold = artWrap.offsetWidth * 0.25;
     const canLeft = carouselPanel < 2;
-    const canRight = carouselPanel > 0 && (carouselPanel > 1 || currentChapters.length > 0);
+    const canRight = carouselPanel > 0;
     if (dx < -threshold && canLeft) setCarouselPanel(carouselPanel + 1);
     else if (dx > threshold && canRight) setCarouselPanel(carouselPanel - 1);
     else setCarouselPanel(carouselPanel);
@@ -1807,7 +1829,7 @@ artWrap.addEventListener('touchend', e => {
 }, { passive: true });
 
 // Clickable carousel dots
-document.getElementById('art-dot-0').addEventListener('click', () => { if (currentChapters.length) setCarouselPanel(0); });
+document.getElementById('art-dot-0').addEventListener('click', () => setCarouselPanel(0));
 document.getElementById('art-dot-1').addEventListener('click', () => setCarouselPanel(1));
 document.getElementById('art-dot-2').addEventListener('click', () => setCarouselPanel(2));
 
@@ -1816,12 +1838,11 @@ function updateCarouselBtns() {
   const prev = document.getElementById('carousel-prev');
   const next = document.getElementById('carousel-next');
   if (!prev) return;
-  prev.disabled = carouselPanel === 0 || (carouselPanel === 1 && !currentChapters.length);
+  prev.disabled = carouselPanel === 0;
   next.disabled = carouselPanel === 2;
 }
 document.getElementById('carousel-prev').addEventListener('click', () => {
-  const canRight = carouselPanel > 0 && (carouselPanel > 1 || currentChapters.length > 0);
-  if (canRight) setCarouselPanel(carouselPanel - 1);
+  if (carouselPanel > 0) setCarouselPanel(carouselPanel - 1);
 });
 document.getElementById('carousel-next').addEventListener('click', () => {
   if (carouselPanel < 2) setCarouselPanel(carouselPanel + 1);
