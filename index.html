@@ -862,7 +862,6 @@ async function fetchFeed(podId, feedUrl, podMeta = {}, persist = true) {
       const chaptersNode = item.getElementsByTagNameNS('https://podcastindex.org/namespace/1.0','chapters')[0]
         || Array.from(item.getElementsByTagName('*')).find(n => n.localName === 'chapters' && n.hasAttribute('url'));
       const chaptersUrl = chaptersNode?.getAttribute('url') || '';
-      if (i === 0) console.log('[chapters] feed item[0] chaptersNode=', chaptersNode, 'chaptersUrl=', chaptersUrl);
       return {
         id: `${podId}_${i}`,
         podId,
@@ -1645,47 +1644,88 @@ async function fetchJson(url) {
   }
 }
 
-// Parse ID3v2 CHAP frames from the first 64 KB of an MP3 file
+// Parse ID3v2 CHAP frames embedded in an MP3 file
 async function loadChaptersFromId3(audioUrl) {
   if (!audioUrl) return null;
+  const MAX_ID3_BYTES = 3 * 1024 * 1024;
 
-  // Read first MAX bytes from a fetch response, then cancel the stream
+  function id3TagEnd(buf) {
+    if (buf.length < 10) return 0;
+    if (buf[0] !== 0x49 || buf[1] !== 0x44 || buf[2] !== 0x33) return 0;
+    return 10 + (((buf[6]&0x7f)<<21)|((buf[7]&0x7f)<<14)|((buf[8]&0x7f)<<7)|(buf[9]&0x7f));
+  }
+
+  function mergeChunks(chunks, total) {
+    const buf = new Uint8Array(total);
+    let off = 0;
+    for (const c of chunks) { buf.set(c, off); off += c.length; }
+    return buf;
+  }
+
+  function chapterAudioUrls(url) {
+    const urls = [url];
+    try {
+      const u = new URL(url);
+      const libsynMatch = url.match(/(?:https?:\/\/)?traffic\.libsyn\.com\/(.+\.mp3)(?:[?#].*)?$/i)
+        || url.match(/traffic\.libsyn\.com\/(.+\.mp3)(?:[?#].*)?$/i);
+      if (libsynMatch) {
+        urls.push(`https://pscrb.fm/rss/p/traffic.libsyn.com/${libsynMatch[1]}`);
+        urls.push(`https://traffic.libsyn.com/${libsynMatch[1]}`);
+      }
+      const atpMatch = u.hostname === 'atp.fm' && u.pathname.match(/^\/audio\/[^/]+\/([^/]+\.mp3)$/i);
+      if (atpMatch) {
+        urls.push(`https://pscrb.fm/rss/p/traffic.libsyn.com/atpfm/${atpMatch[1]}`);
+        urls.push(`https://traffic.libsyn.com/atpfm/${atpMatch[1]}`);
+      }
+    } catch {}
+    return [...new Set(urls)];
+  }
+
+  // Read enough of the ID3 tag to include chapter frames. Some feeds put large
+  // chapter artwork before later CHAP frames, so 64 KB is not enough.
   async function readHead(response) {
-    const MAX = 65536;
+    if (!response.body) throw new Error('stream unavailable');
     const reader = response.body.getReader();
     const chunks = [];
     let total = 0;
-    while (total < MAX) {
+    let need = 65536;
+    while (total < need && total < MAX_ID3_BYTES) {
       const { done, value } = await reader.read();
       if (done) break;
       chunks.push(value);
       total += value.length;
+      const buf = mergeChunks(chunks, total);
+      const tagEnd = id3TagEnd(buf);
+      if (tagEnd) need = Math.min(tagEnd, MAX_ID3_BYTES);
+      else if (total >= 10) break;
     }
     reader.cancel().catch(() => {});
-    const buf = new Uint8Array(Math.min(total, MAX));
-    let off = 0;
-    for (const c of chunks) { const take = Math.min(c.length, MAX - off); buf.set(c.slice(0, take), off); off += take; }
-    return buf;
+    return mergeChunks(chunks, total);
   }
 
   let buf;
-  try {
-    // Attempt 1: plain GET — no Range header, no CORS preflight, works on most podcast CDNs.
-    // We stream and cancel after 64 KB so we don't download the whole MP3.
-    const r = await fetch(audioUrl, { signal: AbortSignal.timeout(20000) });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    buf = await readHead(r);
-  } catch {
+  for (const url of chapterAudioUrls(audioUrl)) {
     try {
-      // Attempt 2: Range request — faster if server supports it, but needs CORS preflight.
-      const r = await fetch(audioUrl, { headers: { Range: 'bytes=0-65535' }, signal: AbortSignal.timeout(20000) });
-      if (!r.ok && r.status !== 206) return null;
+      // Attempt 1: plain GET. We cancel after the ID3 tag, so this does not
+      // download the whole MP3 on streaming-capable browsers.
+      const r = await fetch(url, { signal: AbortSignal.timeout(25000) });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
       buf = await readHead(r);
-    } catch(e) {
-      console.warn('[chapters] ID3 fetch failed', e);
-      return null;
+      break;
+    } catch {
+      try {
+        // Attempt 2: bounded range request. This also helps Safari when fetch
+        // streams are unavailable and handles large ID3 tags from Relay/ATP.
+        const r = await fetch(url, { headers: { Range: `bytes=0-${MAX_ID3_BYTES - 1}` }, signal: AbortSignal.timeout(25000) });
+        if (!r.ok && r.status !== 206) throw new Error(`HTTP ${r.status}`);
+        buf = new Uint8Array(await r.arrayBuffer());
+        break;
+      } catch(e) {
+        console.warn('[chapters] ID3 fetch failed', url, e);
+      }
     }
   }
+  if (!buf) return null;
 
   try {
     // Verify ID3 magic
@@ -1720,7 +1760,7 @@ async function loadChaptersFromId3(audioUrl) {
       if (buf[pos] === 0) break;
       const fid = String.fromCharCode(...buf.slice(pos, pos + idLen));
       const fsz = frameSize(pos + idLen);
-      if (fsz <= 0 || fsz > 524288) break;
+      if (fsz <= 0 || pos + hdrLen + fsz > Math.min(tagEnd, buf.length)) break;
       const fdata = pos + hdrLen;
 
       if (fid === 'CHAP') {
@@ -1740,6 +1780,7 @@ async function loadChaptersFromId3(audioUrl) {
           const sid = String.fromCharCode(...buf.slice(sub, sub + idLen));
           const ssz = frameSize(sub + idLen);
           if (ssz <= 0) break;
+          if (sub + hdrLen + ssz > Math.min(subEnd, buf.length)) break;
           if (sid === 'TIT2') title = decodeStr(sub + hdrLen, ssz);
           if (sid === 'WXXX' || sid === 'WXX') {
             // Skip encoding byte + description, then URL
@@ -1758,7 +1799,6 @@ async function loadChaptersFromId3(audioUrl) {
       }
       pos += hdrLen + fsz;
     }
-    console.log('[chapters] ID3 parse complete, found', chapters.length, 'chapters');
     return chapters.length > 0 ? chapters.sort((a,b) => a.startTime - b.startTime) : null;
   } catch(e) {
     console.warn('[chapters] ID3 parse error', e);
@@ -1772,12 +1812,10 @@ async function loadChapters(ep) {
 
   // ?? not || : '' means "fetched, no chapters"; undefined means "never fetched"
   let resolvedUrl = ep?.chaptersUrl ?? (getEps(ep?.podId || 0)).find(e => e.id === ep?.id)?.chaptersUrl;
-  console.log('[chapters] loadChapters', ep?.id, 'ep.chaptersUrl=', ep?.chaptersUrl, 'library=', (getEps(ep?.podId||0)).find(e=>e.id===ep?.id)?.chaptersUrl, '→ resolvedUrl=', resolvedUrl);
 
   // If never fetched, try a lazy feed refresh for subscribed podcasts (once — chaptersLoading guards recursion)
   if (resolvedUrl === undefined && ep?.podId && !chaptersLoading) {
     const sub = S.subs.find(s => s.id === ep.podId);
-    console.log('[chapters] lazy fetch — sub=', sub?.name, 'feedUrl=', sub?.feedUrl);
     if (sub?.feedUrl) {
       chaptersLoading = true;
       chDiv.innerHTML = '<div style="color:var(--dim);font-size:13px;padding:8px 4px">Loading chapters…</div>';
@@ -1788,7 +1826,6 @@ async function loadChapters(ep) {
       if (chaptersEpId === ep.id) return;
       // Otherwise read chaptersUrl from the freshly saved library
       resolvedUrl = (getEps(ep.podId)).find(e => e.id === ep.id)?.chaptersUrl ?? '';
-      console.log('[chapters] after lazy fetch resolvedUrl=', resolvedUrl);
     } else {
       resolvedUrl = '';
     }
@@ -1801,7 +1838,6 @@ async function loadChapters(ep) {
     // Skip if already tried for this episode
     if (chaptersEpId === ep.id) return;
     if (ep?.audioUrl) {
-      console.log('[chapters] no RSS chaptersUrl — trying ID3 CHAP frames');
       chDiv.innerHTML = '<div style="color:var(--dim);font-size:13px;padding:8px 4px">Loading chapters…</div>';
       dot0.style.display = '';
       const id3Chs = await loadChaptersFromId3(ep.audioUrl);
@@ -1815,7 +1851,6 @@ async function loadChapters(ep) {
         return;
       }
     }
-    console.log('[chapters] no chapters found anywhere');
     currentChapters = []; chaptersEpId = ep.id; lastHighlightedChapter = -1;
     dot0.style.display = 'none';
     chDiv.innerHTML = '<div style="color:var(--dim);font-size:13px;padding:8px 4px">No chapters for this episode.</div>';
@@ -1824,15 +1859,13 @@ async function loadChapters(ep) {
   }
 
   // Already loaded for this episode
-  if (chaptersEpId === ep.id) { console.log('[chapters] already loaded'); return; }
+  if (chaptersEpId === ep.id) return;
 
-  console.log('[chapters] fetching JSON from', resolvedUrl);
   currentChapters = []; chaptersEpId = ep.id; lastHighlightedChapter = -1;
   dot0.style.display = '';
   chDiv.innerHTML = '<div style="color:var(--dim);font-size:13px;padding:8px 4px">Loading chapters…</div>';
   try {
     const json = await fetchJson(resolvedUrl);
-    console.log('[chapters] JSON received, chapters count=', json.chapters?.length);
     currentChapters = (json.chapters || []).filter(c => typeof c.startTime === 'number');
     renderChapters();
     updateCarouselBtns();
