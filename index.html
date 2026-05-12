@@ -779,7 +779,7 @@ async function fetchFeed(podId, feedUrl, podMeta = {}, persist = true) {
       if (chDesc) document.getElementById('ph-desc').textContent = chDesc;
     }
     const items = xml.querySelectorAll('item');
-    const eps = Array.from(items).slice(0, 60).map((item, i) => {
+    const eps = Array.from(items).map((item, i) => {
       const enc = item.querySelector('enclosure');
       const audioUrl = enc?.getAttribute('url') || '';
       if (!audioUrl) return null;
@@ -816,6 +816,9 @@ async function fetchFeed(podId, feedUrl, podMeta = {}, persist = true) {
   }
 }
 
+let epCurrentEps = [], epAllEps = [], epRenderBatch = 0, epObserver = null;
+const EP_BATCH = 30;
+
 function renderEps(podId) {
   const allEps = getEps(podId);
   const el = document.getElementById('ep-list');
@@ -823,20 +826,56 @@ function renderEps(podId) {
   const fq = document.getElementById('ep-filter').value.trim().toLowerCase();
   const eps = fq ? allEps.filter(ep => ep.title.toLowerCase().includes(fq)) : allEps;
   if (!eps.length) { el.innerHTML = '<div class="empty"><p>No matches.</p></div>'; return; }
-  el.innerHTML = eps.map(ep => {
-    const i = allEps.indexOf(ep);
+  if (epObserver) { epObserver.disconnect(); epObserver = null; }
+  epAllEps = allEps;
+  epCurrentEps = eps;
+  epRenderBatch = 0;
+  el.innerHTML = '';
+  appendEpBatch();
+}
+
+function appendEpBatch() {
+  const el = document.getElementById('ep-list');
+  const start = epRenderBatch * EP_BATCH;
+  const end = Math.min(start + EP_BATCH, epCurrentEps.length);
+  if (start >= epCurrentEps.length) return;
+  const sentinel = document.getElementById('ep-sentinel');
+  if (sentinel) sentinel.remove();
+  el.insertAdjacentHTML('beforeend', epCurrentEps.slice(start, end).map(ep => {
+    const i = epAllEps.indexOf(ep);
     const inQ = S.queue.some(q => q.id === ep.id);
     const heard = !!S.listened[ep.id];
-    return `
-    <div class="ep-item" onclick="tapEpisode(${podId},${i},event)">
+    return `<div class="ep-item" onclick="tapEpisode(${ep.podId},${i},event)">
       <img class="ep-art" src="${esc(ep.art)}" alt="" loading="lazy">
       <div class="ep-info">
         <div class="ep-title">${esc(ep.title)}</div>
         <div class="ep-meta">${esc(ep.date)}${ep.dur ? ' · '+ft(ep.dur) : ''}${heard ? ' · <span class="ep-listened">✓ listened</span>' : ''}</div>
       </div>
-      <button class="add-btn${inQ?' in-queue':''}" onclick="addToQueue(${podId},${i},event)" title="${inQ?'In queue':'Add to queue'}">${inQ?'✓':'+'}</button>
+      <button id="add-${ep.id}" class="add-btn${inQ?' in-queue':''}" onclick="addToQueue(${ep.podId},${i},event)" title="${inQ?'In queue':'Add to queue'}">${inQ?'✓':'+'}</button>
     </div>`;
-  }).join('');
+  }).join(''));
+  epRenderBatch++;
+  if (end < epCurrentEps.length) {
+    const s = document.createElement('div');
+    s.id = 'ep-sentinel';
+    s.style.height = '1px';
+    el.appendChild(s);
+    epObserver = new IntersectionObserver(([e]) => {
+      if (!e.isIntersecting) return;
+      epObserver.disconnect(); epObserver = null;
+      appendEpBatch();
+    }, { root: el, rootMargin: '300px' });
+    epObserver.observe(s);
+  }
+}
+
+function refreshEpAddBtn(ep) {
+  const btn = document.getElementById(`add-${ep.id}`);
+  if (!btn) return;
+  const inQ = S.queue.some(q => q.id === ep.id);
+  btn.className = 'add-btn' + (inQ ? ' in-queue' : '');
+  btn.title = inQ ? 'In queue' : 'Add to queue';
+  btn.textContent = inQ ? '✓' : '+';
 }
 
 function tapEpisode(podId, epIdx, e) {
@@ -898,7 +937,7 @@ document.getElementById('eps-play').addEventListener('click', () => {
   S.pos = S.positions[ep.id] || 0;
   loadTrack(true);
   save();
-  if (episodePodcastId !== null) renderEps(episodePodcastId);
+  refreshEpAddBtn(ep);
   updateMini();
   openPlayer();
 });
@@ -916,7 +955,7 @@ document.getElementById('qs-next').addEventListener('click', () => {
   if (S.queue.some(q => q.id === ep.id)) { toast('Already in queue'); return; }
   S.queue.splice(S.qi + 1, 0, {...ep});
   save(); updateMini();
-  if (episodePodcastId !== null) renderEps(episodePodcastId);
+  refreshEpAddBtn(ep);
   toast('Playing next');
 });
 
@@ -926,7 +965,7 @@ document.getElementById('qs-end').addEventListener('click', () => {
   if (S.queue.some(q => q.id === ep.id)) { toast('Already in queue'); return; }
   S.queue.push({...ep});
   save(); updateMini();
-  if (episodePodcastId !== null) renderEps(episodePodcastId);
+  refreshEpAddBtn(ep);
   toast('Added to end');
 });
 
@@ -940,7 +979,7 @@ function removeFromQueue(ep) {
   if (S.qi >= S.queue.length) S.qi = Math.max(0, S.queue.length - 1);
   save();
   updateMini();
-  if (episodePodcastId !== null) renderEps(episodePodcastId);
+  refreshEpAddBtn(ep);
   if (!S.queue.length) { document.getElementById('full-player').classList.remove('on'); }
   else if (wasCurrent) updateFP();
   toast('Removed from queue');
