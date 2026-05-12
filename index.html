@@ -577,7 +577,7 @@ function nav(view) {
   const map = { search: 'v-search', queue: 'v-queue', waypoints: 'v-waypoints' };
   document.getElementById(map[view])?.classList.add('active');
   if (view === 'queue') renderQueue();
-  else if (view === 'waypoints') renderWaypoints();
+  else if (view === 'waypoints') { renderWaypoints(); requestAnimationFrame(() => { const el = document.getElementById('wp-list'); if (el) el.scrollTop = el.scrollHeight; }); }
 }
 
 document.getElementById('ep-back').addEventListener('click', () => {
@@ -1567,7 +1567,7 @@ document.querySelectorAll('.spd-btn').forEach(b => {
 document.getElementById('fp-mark-wp').addEventListener('click', () => {
   const ep = S.queue[S.qi];
   if (!ep) { toast('Nothing playing'); return; }
-  S.waypoints.unshift({
+  S.waypoints.push({
     id: Date.now(),
     label: ep.title.slice(0,50),
     epId: ep.id,
