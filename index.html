@@ -857,7 +857,9 @@ async function fetchFeed(podId, feedUrl, podMeta = {}, persist = true) {
       const epNum = item.getElementsByTagNameNS(itns, 'episode')[0]?.textContent?.trim() || '';
       const rawDesc = (item.getElementsByTagNameNS('http://purl.org/rss/1.0/modules/content/','encoded')[0] || item.getElementsByTagNameNS(itns,'summary')[0] || item.querySelector('description'))?.textContent?.trim() || '';
       const desc = rawDesc.replace(/<[^>]*>/g,' ').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&nbsp;/g,' ').replace(/\s+/g,' ').trim();
-      const chaptersUrl = item.getElementsByTagNameNS('https://podcastindex.org/namespace/1.0','chapters')[0]?.getAttribute('url') || '';
+      const chaptersNode = item.getElementsByTagNameNS('https://podcastindex.org/namespace/1.0','chapters')[0]
+        || Array.from(item.getElementsByTagName('*')).find(n => n.localName === 'chapters' && n.hasAttribute('url'));
+      const chaptersUrl = chaptersNode?.getAttribute('url') || '';
       return {
         id: `${podId}_${i}`,
         podId,
@@ -877,6 +879,12 @@ async function fetchFeed(podId, feedUrl, podMeta = {}, persist = true) {
     // Update episode count in header now that we have data
     if (currentBrowsePod?.id === podId) {
       document.getElementById('ph-count').textContent = `${eps.length} episodes`;
+    }
+    // Re-trigger chapters if the currently playing episode is from this podcast
+    const curEp = S.queue[S.qi];
+    if (curEp?.podId === podId) {
+      const freshEp = eps.find(e => e.id === curEp.id);
+      if (freshEp?.chaptersUrl) { chaptersEpId = null; loadChapters(freshEp); }
     }
   } catch(e) {
     console.error('Feed error', e);
@@ -1622,12 +1630,13 @@ async function fetchJson(url) {
 }
 
 async function loadChapters(ep) {
-  // Queue entries are old copies — look up fresh chaptersUrl from library if missing
-  const chaptersUrl = ep?.chaptersUrl || getEps(ep?.podId)?.find(e => e.id === ep?.id)?.chaptersUrl || '';
-  if (ep && chaptersUrl && !ep.chaptersUrl) ep = { ...ep, chaptersUrl };
+  // Queue entries may be stale copies — resolve chaptersUrl from library if missing
+  const resolvedUrl = ep?.chaptersUrl
+    || (getEps(ep?.podId || 0)).find(e => e.id === ep?.id)?.chaptersUrl
+    || '';
   const chDiv = document.getElementById('fp-chapters');
   const dot0 = document.getElementById('art-dot-0');
-  if (!ep?.chaptersUrl) {
+  if (!resolvedUrl) {
     currentChapters = []; chaptersEpId = null; lastHighlightedChapter = -1;
     dot0.style.display = 'none';
     chDiv.innerHTML = '';
@@ -1638,7 +1647,7 @@ async function loadChapters(ep) {
   dot0.style.display = '';
   chDiv.innerHTML = '<div style="color:var(--dim);font-size:13px;padding:8px 4px">Loading chapters…</div>';
   try {
-    const json = await fetchJson(ep.chaptersUrl);
+    const json = await fetchJson(resolvedUrl);
     currentChapters = (json.chapters || []).filter(c => typeof c.startTime === 'number');
     renderChapters();
     updateCarouselBtns();
