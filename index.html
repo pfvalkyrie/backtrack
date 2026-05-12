@@ -320,13 +320,13 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:-apple-
         <div id="mini-show"></div>
       </div>
       <div class="mini-btns">
-        <button class="mini-btn" id="mini-back13">
+        <button class="mini-btn" id="mini-back13" aria-label="Skip back 13 seconds">
           <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>
         </button>
-        <button class="mini-btn pp" id="mini-pp-btn">
+        <button class="mini-btn pp" id="mini-pp-btn" aria-label="Play">
           <svg id="mini-pp-icon" width="32" height="32" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
         </button>
-        <button class="mini-btn" id="mini-fwd13">
+        <button class="mini-btn" id="mini-fwd13" aria-label="Skip forward 13 seconds">
           <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8z"/></svg>
         </button>
       </div>
@@ -392,22 +392,22 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:-apple-
   </div>
 
   <div class="main-ctrl">
-    <button class="c-btn" id="fp-prev">
+    <button class="c-btn" id="fp-prev" aria-label="Previous track">
       <svg width="40" height="40" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg>
       <span>Prev</span>
     </button>
-    <button class="skip-btn" id="fp-back30">
+    <button class="skip-btn" id="fp-back30" aria-label="Skip back 30 seconds">
       <svg width="30" height="30" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>
       <span>30s</span>
     </button>
-    <button class="c-play" id="fp-pp">
+    <button class="c-play" id="fp-pp" aria-label="Play">
       <svg id="fp-pp-icon" width="34" height="34" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
     </button>
-    <button class="skip-btn" id="fp-fwd30">
+    <button class="skip-btn" id="fp-fwd30" aria-label="Skip forward 30 seconds">
       <svg width="30" height="30" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8z"/></svg>
       <span>30s</span>
     </button>
-    <button class="c-btn" id="fp-next">
+    <button class="c-btn" id="fp-next" aria-label="Next track">
       <svg width="40" height="40" viewBox="0 0 24 24" fill="currentColor"><path d="M6 18 14.5 12 6 6v12zm9-12v12h2V6h-2z"/></svg>
       <span>Next</span>
     </button>
@@ -643,6 +643,7 @@ function toggleSub(id, name, art, feedUrl, desc, btn) {
   const i = S.subs.findIndex(s => s.id === id);
   if (i > -1) {
     S.subs.splice(i, 1);
+    delete S.lib[id];
     if (btn) { btn.textContent = '+ Subscribe'; btn.classList.remove('done'); }
     toast('Unsubscribed');
   } else {
@@ -872,6 +873,11 @@ function openEpSheet(ep) {
   const meta = [ep.epNum ? `Ep ${ep.epNum}` : '', ep.date, ep.dur ? ft(ep.dur) : ''].filter(Boolean).join(' · ');
   document.getElementById('eps-meta').textContent = meta;
   document.getElementById('eps-desc').textContent = ep.desc || 'No show notes available.';
+  const inQ = S.queue.some(q => q.id === ep.id);
+  const addBtn = document.getElementById('eps-add-q');
+  addBtn.textContent = inQ ? '✓ In Queue' : '+ Queue';
+  addBtn.style.opacity = inQ ? '0.5' : '';
+  addBtn.disabled = inQ;
   epSheet.classList.add('on');
 }
 
@@ -907,6 +913,7 @@ document.getElementById('eps-add-q').addEventListener('click', () => {
 document.getElementById('qs-next').addEventListener('click', () => {
   if (!qsEp) return;
   const ep = qsEp; hideQueueSheet();
+  if (S.queue.some(q => q.id === ep.id)) { toast('Already in queue'); return; }
   S.queue.splice(S.qi + 1, 0, {...ep});
   save(); updateMini();
   if (episodePodcastId !== null) renderEps(episodePodcastId);
@@ -916,6 +923,7 @@ document.getElementById('qs-next').addEventListener('click', () => {
 document.getElementById('qs-end').addEventListener('click', () => {
   if (!qsEp) return;
   const ep = qsEp; hideQueueSheet();
+  if (S.queue.some(q => q.id === ep.id)) { toast('Already in queue'); return; }
   S.queue.push({...ep});
   save(); updateMini();
   if (episodePodcastId !== null) renderEps(episodePodcastId);
@@ -1292,6 +1300,7 @@ function nextTrack() {
   if (S.qi < S.queue.length - 1) { S.qi++; S.pos = 0; loadTrack(!audio.paused); save(); }
 }
 
+let lastSavedBucket = -1;
 audio.addEventListener('timeupdate', () => {
   if (scrubbing) return;
   S.pos = audio.currentTime;
@@ -1302,9 +1311,12 @@ audio.addEventListener('timeupdate', () => {
     if (!S.listened[ep.id] && audio.duration && audio.currentTime / audio.duration >= 0.8) {
       S.listened[ep.id] = true;
       save();
+      lastSavedBucket = Math.floor(audio.currentTime / 5);
+      return;
     }
   }
-  if (Math.round(audio.currentTime) % 5 === 0) save();
+  const bucket = Math.floor(audio.currentTime / 5);
+  if (bucket !== lastSavedBucket) { lastSavedBucket = bucket; save(); }
 });
 
 audio.addEventListener('play', () => setPlayIcons(false));
@@ -1316,8 +1328,11 @@ audio.addEventListener('ended', () => {
 
 function setPlayIcons(paused) {
   const icon = paused ? PLAY_ICON : PAUSE_ICON;
+  const label = paused ? 'Play' : 'Pause';
   document.getElementById('mini-pp-icon').innerHTML = icon;
   document.getElementById('fp-pp-icon').innerHTML = icon;
+  document.getElementById('mini-pp-btn').setAttribute('aria-label', label);
+  document.getElementById('fp-pp').setAttribute('aria-label', label);
   if ('mediaSession' in navigator) {
     navigator.mediaSession.playbackState = paused ? 'paused' : 'playing';
   }
