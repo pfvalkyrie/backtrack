@@ -307,7 +307,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:-apple-
 
   <!-- WAYPOINTS VIEW -->
   <div id="v-waypoints" class="view">
-    <div class="vhead"><h1>Waypoints</h1></div>
+    <div class="vhead"><h1>Waypoints</h1><button class="vhead-action" id="wp-clear-btn" onclick="clearAllWaypoints()" style="display:none">Clear All</button></div>
     <div class="scroll-area" id="wp-list"></div>
   </div>
 
@@ -1681,12 +1681,21 @@ function delWaypoint(ev, id) {
   renderWaypoints();
 }
 
+function clearAllWaypoints() {
+  S.waypoints = [];
+  save();
+  renderWaypoints();
+}
+
 function renderWaypoints() {
   const el = document.getElementById('wp-list');
+  const clearBtn = document.getElementById('wp-clear-btn');
   if (!S.waypoints.length) {
     el.innerHTML = '<div class="empty"><div class="ico">⚑</div><p>No waypoints yet.<br>Tap ⚑ in the player to mark a moment.</p></div>';
+    if (clearBtn) clearBtn.style.display = 'none';
     return;
   }
+  if (clearBtn) clearBtn.style.display = '';
   el.innerHTML = S.waypoints.map(wp => `
     <div class="wp-item" onclick="jumpToWaypoint(${wp.id})">
       <div class="wp-icon">⚑</div>
