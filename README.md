@@ -97,6 +97,8 @@ GitHub Pages takes ~1 minute to go live after each push.
 - **Show notes not appearing for some feeds:** iTunes RSS uses `content:encoded` for full notes; now checked first before `itunes:summary` and `description`.
 - **iOS keyboard not appearing on filter inputs:** `type="search"` + dynamically shown views don't trigger keyboard; use `type="text" inputmode="search"`.
 - **Mini player progress bar not visible:** `overflow:hidden` + `border-radius` doesn't clip correctly on iOS Safari without `-webkit-transform:translateZ(0)`.
+- **Full player controls clipped on small screens:** `#fp-inner` changed from `overflow:hidden` to `overflow-y:auto` so controls scroll into view rather than being cut off.
+- **Long URLs in episode detail sheet overflowing:** `.eps-desc` now has `word-break:break-word; overflow-wrap:break-word`.
 
 ---
 
@@ -109,11 +111,9 @@ GitHub Pages takes ~1 minute to go live after each push.
 
 ## Known bugs / open issues
 
-- **`#fp-inner` is `overflow:hidden`** — controls may be clipped on very small screens (iPhone SE). A layout that shrinks gracefully would fix this.
 - **Episode IDs are position-based** — `${podId}_0` always refers to the first item in the feed slice. After a feed refresh, a new episode shifts all IDs; queue entries become stale references.
 - **Unsubscribe doesn't clean up `S.lib` cache** — episodes remain in memory and localStorage after unsubscribing.
-- **`.eps-desc` missing word-break** — long URLs in the episode detail sheet can overflow horizontally (same fix needed as was applied to `#fp-notes`).
-- **Mini player title shows raw HTML entities** — e.g. `&#8217;` instead of `'`; needs entity decoding when setting `mini-title` text.
+- **Mini player title shows raw HTML entities** — feeds that wrap titles in CDATA (e.g. `<![CDATA[OpenAI&#8217;s Episode]]>`) pass `&#8217;` as literal text; needs HTML entity decoding after `textContent` extraction.
 
 ---
 
