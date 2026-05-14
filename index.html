@@ -1573,7 +1573,7 @@ audio.addEventListener('ended', () => {
   const endedEp = S.queue[S.qi];
   resetEpisodeProgress(endedEp);
   if (S.qi < S.queue.length - 1) {
-    nextTrack({ play: true, startAt: 'beginning' });
+    nextTrack({ play: true });
   } else {
     try { audio.currentTime = 0; } catch {}
     updateProgress();
