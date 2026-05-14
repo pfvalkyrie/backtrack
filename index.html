@@ -94,6 +94,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:-apple-
 .qeb-btn{flex:1;padding:12px 8px;border-radius:14px;border:none;font-size:15px;font-weight:600;cursor:pointer}
 .qeb-remove{background:var(--gradient);color:#000}
 .qeb-remove:disabled{opacity:0.35}
+.qeb-keep{background:var(--s2);color:var(--orange)}
 .qeb-clear{background:var(--s2);color:var(--text)}
 
 /* Waypoints */
@@ -357,6 +358,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:-apple-
     <div class="scroll-area" id="queue-list"></div>
     <div id="queue-edit-bar">
       <button class="qeb-btn qeb-remove" id="qeb-remove" disabled onclick="removeQueueSelected()">Remove</button>
+      <button class="qeb-btn qeb-keep" onclick="keepCurrentOnly()">Keep Current</button>
       <button class="qeb-btn qeb-clear" onclick="clearQueue()">Clear All</button>
     </div>
   </div>
@@ -630,8 +632,25 @@ function parseDur(s) {
 
 // ── Navigation ────────────────────────────────────────────────────────────────
 document.querySelectorAll('.tab').forEach(t => {
-  t.addEventListener('click', () => nav(t.dataset.v));
+  t.addEventListener('click', () => handleTabTap(t.dataset.v));
 });
+
+function scrollQueueToCurrent() {
+  renderQueue();
+  requestAnimationFrame(() => {
+    const cur = document.querySelector(`#queue-list .q-item[data-qi="${S.qi}"]`);
+    if (cur) cur.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+}
+
+function handleTabTap(view) {
+  if (view === 'queue' && currentView === 'queue') {
+    if (queueEditMode) return;
+    scrollQueueToCurrent();
+    return;
+  }
+  nav(view);
+}
 
 function nav(view) {
   // Save scroll positions before leaving current view
@@ -1199,6 +1218,26 @@ function clearQueue() {
   updateMini();
 }
 
+function keepCurrentOnly() {
+  const ep = S.queue[S.qi];
+  if (!ep) return;
+  purgeWaypoints(new Set(S.queue.filter(q => q.id !== ep.id).map(q => q.id)));
+  S.queue = [ep];
+  S.qi = 0;
+  S.pos = S.positions[ep.id] || audio.currentTime || 0;
+  save();
+  queueSelected.clear();
+  queueEditMode = false;
+  document.getElementById('queue-edit-btn').textContent = 'Edit';
+  document.getElementById('qeb-remove').textContent = 'Remove';
+  document.getElementById('qeb-remove').disabled = true;
+  document.getElementById('queue-edit-bar').classList.remove('visible');
+  renderQueue();
+  updateMini();
+  updateFP();
+  toast('Kept current episode');
+}
+
 function renderQueue() {
   const el = document.getElementById('queue-list');
   const editBtn = document.getElementById('queue-edit-btn');
@@ -1704,11 +1743,7 @@ document.getElementById('fp-queue-btn').addEventListener('click', () => { closeP
 function goToCurrentInQueue() {
   closePlayer();
   nav('queue');
-  setTimeout(() => {
-    renderQueue();
-    const cur = document.querySelector(`#queue-list .q-item[data-qi="${S.qi}"]`);
-    if (cur) cur.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }, 120);
+  setTimeout(scrollQueueToCurrent, 120);
 }
 document.getElementById('fp-title').addEventListener('click', goToCurrentInQueue);
 document.getElementById('fp-show').addEventListener('click', goToCurrentInQueue);
