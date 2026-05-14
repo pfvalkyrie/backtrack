@@ -963,7 +963,7 @@ async function fetchFeed(podId, feedUrl, podMeta = {}, persist = true) {
     }
     // Re-trigger chapters for the playing episode when feed is refreshed externally
     const curEp = S.queue[S.qi];
-    if (curEp?.podId === podId && !chaptersLoading) {
+    if (curEp?.podId === podId && !chapterFeedRefreshes.has(podId)) {
       const freshEp = eps.find(e => e.id === curEp.id);
       if (freshEp) { chaptersEpId = null; loadChapters(freshEp); }
     }
@@ -1781,7 +1781,17 @@ fpTopbar.addEventListener('touchmove', onDragMove, {passive: true});
 fpTopbar.addEventListener('touchend', onDragEnd, {passive: true});
 
 // Chapters
-let currentChapters = [], chaptersEpId = null, lastHighlightedChapter = -1, chaptersLoading = false;
+let currentChapters = [], chaptersEpId = null, lastHighlightedChapter = -1, chapterLoadSeq = 0;
+const chapterFeedRefreshes = new Set();
+const chapterResultCache = {};
+const ID3_CHAPTER_TIMEOUT_MS = 12000;
+
+function withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(label)), ms)),
+  ]);
+}
 
 async function fetchJson(url) {
   async function tryUrl(u) {
@@ -1973,21 +1983,54 @@ async function loadChaptersFromId3(audioUrl) {
 async function loadChapters(ep) {
   const chDiv = document.getElementById('fp-chapters');
   const dot0 = document.getElementById('art-dot-0');
+  const epId = ep?.id;
+  if (!epId) return;
+  const loadToken = ++chapterLoadSeq;
+
+  function isCurrentLoad() {
+    return loadToken === chapterLoadSeq && S.queue[S.qi]?.id === epId;
+  }
+  function showChapterMessage(message, showDot = false, cache = false) {
+    if (!isCurrentLoad()) return;
+    currentChapters = [];
+    chaptersEpId = epId;
+    lastHighlightedChapter = -1;
+    dot0.style.display = showDot ? '' : 'none';
+    chDiv.innerHTML = `<div style="color:var(--dim);font-size:13px;padding:8px 4px">${esc(message)}</div>`;
+    if (cache) chapterResultCache[epId] = { type: 'message', message, showDot };
+    updateCarouselBtns();
+  }
+  function applyChapters(chapters) {
+    if (!isCurrentLoad()) return;
+    currentChapters = chapters;
+    chaptersEpId = epId;
+    lastHighlightedChapter = -1;
+    dot0.style.display = chapters.length ? '' : 'none';
+    chapterResultCache[epId] = { type: 'chapters', chapters };
+    renderChapters();
+    updateCarouselBtns();
+  }
+
+  const cached = chapterResultCache[epId];
+  if (cached?.type === 'chapters') { applyChapters(cached.chapters); return; }
+  if (cached?.type === 'message') { showChapterMessage(cached.message, cached.showDot); return; }
+
+  currentChapters = [];
+  chaptersEpId = null;
+  lastHighlightedChapter = -1;
+  dot0.style.display = '';
+  chDiv.innerHTML = '<div style="color:var(--dim);font-size:13px;padding:8px 4px">Loading chapters…</div>';
 
   // ?? not || : '' means "fetched, no chapters"; undefined means "never fetched"
   let resolvedUrl = ep?.chaptersUrl ?? (getEps(ep?.podId || 0)).find(e => e.id === ep?.id)?.chaptersUrl;
 
-  // If never fetched, try a lazy feed refresh for subscribed podcasts (once — chaptersLoading guards recursion)
-  if (resolvedUrl === undefined && ep?.podId && !chaptersLoading) {
+  // If never fetched, try a lazy feed refresh for subscribed podcasts once per pod.
+  if (resolvedUrl === undefined && ep?.podId && !chapterFeedRefreshes.has(ep.podId)) {
     const sub = S.subs.find(s => s.id === ep.podId);
     if (sub?.feedUrl) {
-      chaptersLoading = true;
-      chDiv.innerHTML = '<div style="color:var(--dim);font-size:13px;padding:8px 4px">Loading chapters…</div>';
-      dot0.style.display = '';
+      chapterFeedRefreshes.add(ep.podId);
       try { await fetchFeed(ep.podId, sub.feedUrl, sub, true); } catch(e) { console.warn('[chapters] fetchFeed error', e); }
-      chaptersLoading = false;
-      // If fetchFeed's re-trigger already loaded chapters (external call path), we're done
-      if (chaptersEpId === ep.id) return;
+      if (!isCurrentLoad()) return;
       // Otherwise read chaptersUrl from the freshly saved library
       resolvedUrl = (getEps(ep.podId)).find(e => e.id === ep.id)?.chaptersUrl ?? '';
     } else {
@@ -1999,43 +2042,32 @@ async function loadChapters(ep) {
 
   // No RSS chapters URL — try ID3 CHAP frames embedded in the MP3 as a fallback
   if (!resolvedUrl) {
-    // Skip if already tried for this episode
-    if (chaptersEpId === ep.id) return;
     if (ep?.audioUrl) {
-      chDiv.innerHTML = '<div style="color:var(--dim);font-size:13px;padding:8px 4px">Loading chapters…</div>';
-      dot0.style.display = '';
-      const id3Chs = await loadChaptersFromId3(ep.audioUrl);
+      let id3Chs = null;
+      try {
+        id3Chs = await withTimeout(loadChaptersFromId3(ep.audioUrl), ID3_CHAPTER_TIMEOUT_MS, 'ID3 chapters timed out');
+      } catch(e) {
+        console.warn('[chapters] ID3 fallback failed', e);
+      }
+      if (!isCurrentLoad()) return;
       if (id3Chs) {
-        currentChapters = id3Chs;
-        chaptersEpId = ep.id;
-        lastHighlightedChapter = -1;
-        dot0.style.display = '';
-        renderChapters();
-        updateCarouselBtns();
+        applyChapters(id3Chs);
         return;
       }
     }
-    currentChapters = []; chaptersEpId = ep.id; lastHighlightedChapter = -1;
-    dot0.style.display = 'none';
-    chDiv.innerHTML = '<div style="color:var(--dim);font-size:13px;padding:8px 4px">No chapters for this episode.</div>';
-    updateCarouselBtns();
+    showChapterMessage('No chapters for this episode.', false, true);
     return;
   }
 
-  // Already loaded for this episode
-  if (chaptersEpId === ep.id) return;
-
-  currentChapters = []; chaptersEpId = ep.id; lastHighlightedChapter = -1;
-  dot0.style.display = '';
-  chDiv.innerHTML = '<div style="color:var(--dim);font-size:13px;padding:8px 4px">Loading chapters…</div>';
   try {
     const json = await fetchJson(resolvedUrl);
-    currentChapters = (json.chapters || []).filter(c => typeof c.startTime === 'number');
-    renderChapters();
-    updateCarouselBtns();
+    if (!isCurrentLoad()) return;
+    const chapters = (json.chapters || []).filter(c => typeof c.startTime === 'number');
+    if (chapters.length) applyChapters(chapters);
+    else showChapterMessage('No chapters for this episode.', false, true);
   } catch(e) {
     console.warn('[chapters] fetchJson failed', e);
-    chDiv.innerHTML = '<div style="color:var(--dim);font-size:13px;padding:8px 4px">Couldn\'t load chapters.</div>';
+    showChapterMessage('Couldn\'t load chapters.');
   }
 }
 
