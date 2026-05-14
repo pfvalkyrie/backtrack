@@ -575,7 +575,14 @@ function pad(n) { return String(n).padStart(2,'0'); }
 function esc(s) {
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
-function q(s) { return String(s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;'); }
+function safeHttpUrl(value) {
+  try {
+    const u = new URL(value, location.href);
+    return (u.protocol === 'https:' || u.protocol === 'http:') ? u.href : '';
+  } catch {
+    return '';
+  }
+}
 
 // Decode HTML entities from CDATA-wrapped fields (e.g. &#8217; → ')
 function decodeEntities(s) {
@@ -681,6 +688,17 @@ document.getElementById('ep-filter').addEventListener('input', () => { if (episo
 // ── Search ────────────────────────────────────────────────────────────────────
 document.getElementById('search-btn').addEventListener('click', doSearch);
 document.getElementById('search-input').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+document.getElementById('search-results').addEventListener('click', e => {
+  const card = e.target.closest('.pod-card');
+  if (!card) return;
+  const collectionId = parseInt(card.dataset.collectionId, 10);
+  if (e.target.closest('.sub-btn')) {
+    const p = getSearchResult(collectionId);
+    if (p) toggleSubFromSearchResult(p, e.target.closest('.sub-btn'));
+    return;
+  }
+  openPodFromSearch(collectionId);
+});
 
 async function doSearch() {
   const q2 = document.getElementById('search-input').value.trim();
@@ -702,13 +720,12 @@ function renderSearch(results) {
   if (!results.length) { el.innerHTML = '<div class="empty"><p>No results found.</p></div>'; return; }
   el.innerHTML = results.map(p => {
     const subbed = S.subs.some(s => s.id === p.collectionId);
-    return `<div class="pod-card" onclick="openPodFromSearch(${p.collectionId},event)" style="cursor:pointer">
+    return `<div class="pod-card" data-collection-id="${esc(p.collectionId)}" style="cursor:pointer">
       <img class="pod-art" src="${esc(p.artworkUrl100)}" alt="" loading="lazy">
       <div class="pod-info">
         <div class="pod-name">${esc(p.collectionName)}</div>
         <div class="pod-desc">${esc(p.artistName||'')}</div>
-        <button class="sub-btn${subbed?' done':''}"
-          onclick="event.stopPropagation();toggleSub(${p.collectionId},'${q(p.collectionName)}','${q(p.artworkUrl600||p.artworkUrl100||'')}','${q(p.feedUrl||'')}','${q(p.artistName||'')}',this)">
+        <button class="sub-btn${subbed?' done':''}">
           ${subbed ? 'Subscribed' : '+ Subscribe'}
         </button>
       </div>
@@ -716,9 +733,16 @@ function renderSearch(results) {
   }).join('');
 }
 
-function openPodFromSearch(collectionId, e) {
-  if (e.target.closest('.sub-btn')) return;
-  const p = lastSearchResults.find(r => r.collectionId === collectionId);
+function getSearchResult(collectionId) {
+  return lastSearchResults.find(r => r.collectionId === collectionId);
+}
+
+function toggleSubFromSearchResult(p, btn) {
+  toggleSub(p.collectionId, p.collectionName, p.artworkUrl600 || p.artworkUrl100 || '', p.feedUrl || '', p.artistName || '', btn);
+}
+
+function openPodFromSearch(collectionId) {
+  const p = getSearchResult(collectionId);
   if (!p) return;
   showEpisodes(p.collectionId, {
     id: p.collectionId,
@@ -836,7 +860,7 @@ async function proxyFetch(feedUrl) {
     if (r.ok) return await r.text();
   } catch {}
 
-  // Race all proxies simultaneously — first winner takes it
+  // Try proxies one at a time so private-ish feed URLs are not sprayed to every fallback.
   const proxies = [
     u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
     u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
@@ -854,7 +878,10 @@ async function proxyFetch(feedUrl) {
     return text;
   }
 
-  return Promise.any(proxies.map(p => tryProxy(p)));
+  for (const proxy of proxies) {
+    try { return await tryProxy(proxy); } catch {}
+  }
+  throw new Error('feed fetch failed');
 }
 
 async function fetchFeed(podId, feedUrl, podMeta = {}, persist = true) {
@@ -1090,6 +1117,10 @@ function removeQueueAt(i, opts = {}) {
   S.queue.splice(i, 1);
   if (i < S.qi) S.qi--;
   if (S.qi >= S.queue.length) S.qi = Math.max(0, S.queue.length - 1);
+  if (wasCurrent && S.queue.length) {
+    const nextEp = S.queue[S.qi];
+    S.pos = (nextEp && S.positions[nextEp.id]) || 0;
+  }
   save();
   updateMini();
   if (opts.refreshBtn) refreshEpAddBtn(ep);
@@ -1115,6 +1146,10 @@ function addToQueue(podId, epIdx, e) {
 // ── Queue ─────────────────────────────────────────────────────────────────────
 let queueEditMode = false;
 let queueSelected = new Set();
+
+function renderQueueIfVisible() {
+  if (currentView === 'queue') renderQueue();
+}
 
 function toggleQueueEdit() {
   queueEditMode = !queueEditMode;
@@ -1212,7 +1247,6 @@ function playAt(i, e) {
   S.pos = (ep && S.positions[ep.id]) || 0;
   loadTrack(true);
   save();
-  renderQueue();
 }
 
 // ── Queue drag-to-reorder ─────────────────────────────────────────────────────
@@ -1443,6 +1477,7 @@ function loadTrack(play = false) {
   updateFP();
   updateMini();
   updateMediaSession();
+  renderQueueIfVisible();
 }
 
 function updateMediaSession() {
@@ -1484,10 +1519,22 @@ function togglePlay() {
 
 function prevTrack() {
   if (audio.currentTime > 3) { audio.currentTime = 0; return; }
-  if (S.qi > 0) { S.qi--; S.pos = 0; loadTrack(!audio.paused); save(); }
+  if (S.qi > 0) {
+    S.qi--;
+    const ep = S.queue[S.qi];
+    S.pos = (ep && S.positions[ep.id]) || 0;
+    loadTrack(!audio.paused);
+    save();
+  }
 }
 function nextTrack() {
-  if (S.qi < S.queue.length - 1) { S.qi++; S.pos = 0; loadTrack(!audio.paused); save(); }
+  if (S.qi < S.queue.length - 1) {
+    S.qi++;
+    const ep = S.queue[S.qi];
+    S.pos = (ep && S.positions[ep.id]) || 0;
+    loadTrack(!audio.paused);
+    save();
+  }
 }
 
 let lastSavedBucket = -1;
@@ -1607,7 +1654,8 @@ function goToCurrentInQueue() {
   closePlayer();
   nav('queue');
   setTimeout(() => {
-    const cur = document.querySelector('.q-item.now');
+    renderQueue();
+    const cur = document.querySelector(`#queue-list .q-item[data-qi="${S.qi}"]`);
     if (cur) cur.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }, 120);
 }
@@ -1662,16 +1710,16 @@ async function fetchJson(url) {
     return JSON.parse(text);
   }
   const enc = encodeURIComponent(url);
-  try {
-    return await Promise.any([
-      tryUrl(url),
-      tryUrl(`https://corsproxy.io/?${enc}`),
-      tryUrl(`https://api.allorigins.win/raw?url=${enc}`),
-      tryUrl(`https://api.codetabs.com/v1/proxy?quest=${enc}`),
-    ]);
-  } catch {
-    throw new Error('chapters fetch failed');
+  const urls = [
+    url,
+    `https://corsproxy.io/?${enc}`,
+    `https://api.allorigins.win/raw?url=${enc}`,
+    `https://api.codetabs.com/v1/proxy?quest=${enc}`,
+  ];
+  for (const u of urls) {
+    try { return await tryUrl(u); } catch {}
   }
+  throw new Error('chapters fetch failed');
 }
 
 // Parse ID3v2 CHAP frames embedded in an MP3 file
@@ -1917,7 +1965,8 @@ function renderChapters() {
     const end = ch.endTime ?? next?.startTime ?? (i === currentChapters.length - 1 ? epDur : null);
     const durSec = end != null ? Math.max(0, end - ch.startTime) : null;
     const durLabel = durSec != null ? (durSec >= 60 ? `${Math.round(durSec/60)}m` : `${Math.round(durSec)}s`) : '';
-    const linkBtn = ch.url ? `<a class="ch-link" href="${esc(ch.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">›</a>` : '';
+    const href = safeHttpUrl(ch.url);
+    const linkBtn = href ? `<a class="ch-link" href="${esc(href)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">›</a>` : '';
     return `<div class="ch-item" id="ch-${i}" onclick="seekToChapter(${ch.startTime})">
       <div class="ch-body">
         <div class="ch-title">${esc(ch.title || `Chapter ${i+1}`)}</div>

@@ -1,2 +1,5 @@
 PRIVATE_NOTES.md
 .obsidian/
+.env
+.env.*
+!.env.example

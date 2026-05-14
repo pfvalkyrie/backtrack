@@ -1,24 +1,24 @@
 # Backtrack — Podcast Player
 
-Single-file iPhone Safari web app. Dark theme (black + orange). Hosted on GitHub Pages.
+Single-file iPhone Safari podcast player. Dark theme, hosted on GitHub Pages.
 
 ## Purpose
 
-Backtrack is a mobile-first podcast player built around recovery-oriented listening. The sleep timer saves a waypoint when it starts, making it easy to return to the point where listening drifted off. Manual waypoints, persistent positions, queue controls, and quick scrubbing are designed for listeners who often need to retrace and resume.
+Backtrack is a mobile-first podcast player built around recovery-oriented listening. The sleep timer saves a waypoint when it starts, so it is easy to return to the point where listening drifted off. Manual waypoints, persistent positions, queue controls, and quick scrubbing make it easy to retrace and resume.
 
-**Source file:** `index.html` (everything inline — HTML, CSS, JS, no build step)  
+**Source file:** `index.html` (inline HTML, CSS, JS; no build step)
 
 ---
 
 ## Development workflow
 
-No build step is required. Edit `index.html` directly and serve or deploy the static files.
+Edit `index.html` directly.
 
 ```bash
 git status --short
 ```
 
-Keep personal machine paths, account details, and local workflow notes in `PRIVATE_NOTES.md`.
+Keep local workflow notes in `PRIVATE_NOTES.md`.
 
 ## Deploy
 
@@ -29,56 +29,56 @@ git commit -m "update"
 git push
 ```
 
-GitHub Pages takes ~1 minute to go live after each push.
+GitHub Pages usually updates in about a minute.
 
 ---
 
 ## Features
 
 ### Browsing & Discovery
-- **Podcast search** via iTunes Search API — tapping a card opens episodes immediately, no subscription required
-- **Browse without subscribing** — feed is fetched into a temp cache; episodes are fully playable; subscribing persists them to library
-- **Podcast info header** — episode view shows artwork, episode count, channel description (from RSS), and a Subscribe/Subscribed toggle
-- **Library** — subscribed shows with episode count; filter bar to search within subscriptions; tapping Library tab restores your last open show rather than always returning to the list
-- **Episode filter** — search within a show's episode list
-- **Pull-to-refresh** — pull down in episode list to re-fetch the feed (works for both subscribed and unsubscribed)
-- **Swipe-to-go-back** — left-edge right-swipe on episode view returns to Library or Search depending on where you came from
+- **Podcast search** via iTunes Search API; tapping a result opens episodes immediately
+- **Browse without subscribing**; feeds are cached temporarily and become part of the library on subscribe
+- **Podcast info header** shows artwork, episode count, channel description, and Subscribe/Subscribed state
+- **Library** keeps subscribed shows with episode counts and restores your last open show
+- **Episode filter** searches within a show’s episode list
+- **Pull-to-refresh** re-fetches the current feed for subscribed and unsubscribed shows
+- **Swipe-to-go-back** returns from the episode view to Library or Search
 
 ### Episodes
-- **Episode detail sheet** — tapping an episode row slides up a sheet showing full show notes, date, duration, episode number
-  - **▶ Play** — adds to queue and starts immediately, opens full player
-  - **+ Queue** — shows Play Next / Add to End action sheet; shows "✓ In Queue" and is disabled if already queued
-- **+ button on episode row** — add to queue (Play Next / Add to End); turns orange ✓ when in queue; tap ✓ to remove
-- **No duplicate queue entries** — Play Next and Add to End both guard against adding the same episode twice
-- **Listened indicator** — episodes played past 80% show `✓ listened` in light orange in the meta line; persists across sessions
+- **Episode detail sheet** shows notes, date, duration, and episode number
+  - **▶ Play** adds to queue, starts playback, and opens the full player
+  - **+ Queue** opens a Play Next / Add to End sheet and disables itself when already queued
+- **+ button on episode row** adds to queue and turns into an orange ✓ when queued
+- **No duplicate queue entries** are allowed
+- **Listened indicator** marks episodes played past 80% and persists across sessions
 
 ### Playback
-- **Continuous queue** — tap episode in queue to play; drag ⠿ to reorder (ghost + placeholder); × to delete
-- **Queue edit mode** — Edit button enters multi-select; tap rows to select; Remove (N) batch-deletes selected; Clear All wipes queue and waypoints; Done exits
-- **Waypoints auto-deleted** — removing an episode from the queue (any method) deletes its waypoints
-- **Persistent position** — remembers where you left off per episode
-- **Playback speed** — 0.75×, 1×, 1.25×, 1.5×, 2×
-- **Skip** — ±30s in full player, ±13s in mini player
-- **Prev/Next track** buttons in full player
+- **Continuous queue** supports tap-to-play, drag reordering, and delete
+- **Queue edit mode** supports multi-select, batch remove, and Clear All
+- **Waypoints** are removed when an episode leaves the queue
+- **Persistent position** remembers where you left off per episode
+- **Playback speed**: 0.75×, 1×, 1.25×, 1.5×, 2×
+- **Skip**: ±30s in full player, ±13s in mini player
+- **Prev/Next track** buttons live in the full player
 
 ### Full Player
-- **Artwork ↔ show notes carousel** — swipe left on artwork to see episode show notes; right to go back
-- **Show notes** — parsed from `content:encoded` → `itunes:summary` → `description` (handles AppStories, Relay FM, Megaphone, etc.)
-- **Swipe down on artwork to dismiss** — or use the topbar drag handle; player is a fixed non-scrolling layout
-- **Progress scrubber** — tap or drag; requires deliberate horizontal intent to avoid conflicts with vertical swipes
-- **Waypoints** — tap ⚑ to bookmark a moment; listed oldest→newest; tab auto-scrolls to most recent; jump resolves by episode ID not queue position
-- **Sleep timer** — ⏾ cycles 15/30/45/60 min then off; saves a waypoint when started so you can find where you fell asleep
+- **Artwork ↔ show notes carousel** swaps between artwork and episode notes
+- **Show notes** are parsed from `content:encoded`, then `itunes:summary`, then `description`
+- **Swipe down on artwork** dismisses the player; the topbar drag handle does the same
+- **Progress scrubber** responds to deliberate horizontal drags and taps
+- **Waypoints** are listed oldest to newest and resolve by episode ID
+- **Sleep timer** cycles 15/30/45/60 minutes, then off, and saves a waypoint when started
 
 ### Mini Player
-- Always visible when something is queued; tap body to expand full player
-- ±13s skip buttons, play/pause
-- Progress bar along the bottom edge
+- Stays visible whenever something is queued and expands on tap
+- Includes ±13s skip buttons and play/pause
+- Shows a progress bar along the bottom edge
 
 ### System
-- **Lock screen / Control Center** — artwork, title, skip ±30s, prev/next track; play/pause handled natively by iOS
-- **Accessibility** — all media controls have `aria-label`; play/pause label updates dynamically between "Play" and "Pause"
-- **Safe area handling** — home indicator and Dynamic Island clearance
-- **Tab order** — Library · Queue · Waypoints · Search
+- **Lock screen / Control Center** exposes artwork, title, skip, and track controls
+- **Accessibility** adds `aria-label` text and updates the play/pause label dynamically
+- **Safe area handling** clears the home indicator and Dynamic Island
+- **Tab order** is Library · Queue · Waypoints · Search
 
 ---
 
@@ -137,6 +137,15 @@ GitHub Pages takes ~1 minute to go live after each push.
 ## Known bugs / open issues
 
 - None currently tracked.
+
+## Public Docs
+
+Still worth adding publicly:
+
+- a short “how to use Backtrack” walkthrough
+- one screenshot or GIF of the full player
+- a simple list of keyboard-free iPhone gestures
+- a brief note on what data stays in localStorage
 
 ---
 
