@@ -83,6 +83,8 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:-apple-
 .q-info{flex:1;min-width:0}
 .q-title{font-size:13px;font-weight:600;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 .q-show{font-size:11px;color:var(--dim);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;margin-top:2px}
+.q-notes{background:none;border:1px solid var(--muted);border-radius:50%;color:var(--muted);font-size:12px;font-weight:800;width:22px;height:22px;padding:0;flex-shrink:0;line-height:1;cursor:pointer}
+.q-notes:active{color:var(--orange);border-color:var(--orange)}
 .q-del{background:none;border:none;color:var(--muted);font-size:22px;padding:4px 6px;cursor:pointer;flex-shrink:0;line-height:1}
 .q-del:active{color:var(--text)}
 .q-drag{background:none;border:none;color:var(--muted);font-size:20px;padding:4px 4px;flex-shrink:0;touch-action:none;line-height:1;cursor:grab}
@@ -1069,7 +1071,11 @@ function openEpSheet(ep) {
   const meta = [ep.epNum ? `Ep ${ep.epNum}` : '', ep.date, ep.dur ? ft(ep.dur) : ''].filter(Boolean).join(' · ');
   document.getElementById('eps-meta').textContent = meta;
   document.getElementById('eps-desc').textContent = ep.desc || 'No show notes available.';
-  const inQ = S.queue.some(q => q.id === ep.id);
+  const qIdx = S.queue.findIndex(q => q.id === ep.id);
+  const inQ = qIdx !== -1;
+  const isCurrent = inQ && qIdx === S.qi;
+  const playBtn = document.getElementById('eps-play');
+  playBtn.textContent = isCurrent ? '▶ Resume' : '▶ Play';
   const addBtn = document.getElementById('eps-add-q');
   addBtn.textContent = inQ ? '✓ In Queue' : '+ Queue';
   addBtn.style.opacity = inQ ? '0.5' : '';
@@ -1089,8 +1095,12 @@ document.getElementById('eps-play').addEventListener('click', () => {
   if (!sheetEp) return;
   const ep = sheetEp;
   closeEpSheet();
-  if (!S.queue.some(q => q.id === ep.id)) S.queue.push({...ep});
-  S.qi = S.queue.findIndex(q => q.id === ep.id);
+  let qIdx = S.queue.findIndex(q => q.id === ep.id);
+  if (qIdx === -1) {
+    S.queue.push({...ep});
+    qIdx = S.queue.length - 1;
+  }
+  S.qi = qIdx;
   S.pos = S.positions[ep.id] || 0;
   loadTrack(true);
   save();
@@ -1261,7 +1271,7 @@ function renderQueue() {
         <div class="q-show">${esc(ep.podName)}</div>
         ${meta ? `<div class="q-meta">${esc(meta)}</div>` : ''}
       </div>
-      ${queueEditMode ? '' : `<button class="q-drag" aria-label="Reorder">⠿</button><button class="q-del" onclick="delFromQueue(event,${i})">×</button>`}
+      ${queueEditMode ? '' : `<button class="q-notes" aria-label="Show notes" onclick="openQueueNotes(event,${i})">i</button><button class="q-drag" aria-label="Reorder">⠿</button><button class="q-del" onclick="delFromQueue(event,${i})">×</button>`}
     </div>`;
   }).join('');
 }
@@ -1277,10 +1287,17 @@ function delFromQueue(ev, i) {
   renderQueue();
 }
 
+function openQueueNotes(ev, i) {
+  ev.stopPropagation();
+  const ep = S.queue[i];
+  if (!ep) return;
+  openEpSheet(ep);
+}
+
 let qDragJustEnded = false;
 function playAt(i, e) {
   if (qDragJustEnded) return;
-  if (e && e.target.closest('.q-drag')) return;
+  if (e && e.target.closest('.q-drag,.q-notes')) return;
   S.qi = i;
   const ep = S.queue[i];
   S.pos = (ep && S.positions[ep.id]) || 0;
