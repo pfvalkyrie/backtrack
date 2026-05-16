@@ -79,10 +79,15 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:-apple-
 .q-item.now{background:var(--s2);border:1.5px solid var(--orange)}
 .q-num{width:22px;text-align:center;font-size:12px;color:var(--muted);flex-shrink:0;font-weight:600}
 .q-item.now .q-num{color:var(--orange)}
-.q-art{width:46px;height:46px;border-radius:12px;object-fit:cover;background:var(--s3);flex-shrink:0}
+.q-art{width:46px;height:46px;border-radius:12px;object-fit:cover;background:var(--s3);flex-shrink:0;cursor:pointer}
 .q-info{flex:1;min-width:0}
 .q-title{font-size:13px;font-weight:600;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 .q-show{font-size:11px;color:var(--dim);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;margin-top:2px}
+.q-status{display:flex;gap:5px;margin-top:6px;overflow:hidden;white-space:nowrap}
+.q-chip{font-size:9px;font-weight:800;letter-spacing:0.2px;color:var(--dim);border:1px solid var(--border);border-radius:8px;padding:3px 6px;line-height:1;background:rgba(255,255,255,0.03);flex-shrink:0}
+.q-chip.playing{color:#000;background:var(--gradient);border-color:transparent}
+.q-chip.sleep{color:#000;background:#f6b73c;border-color:#f6b73c}
+.q-chip.listened{color:var(--orange);border-color:rgba(255,102,0,0.45)}
 .q-notes{background:none;border:1px solid var(--muted);border-radius:50%;color:var(--muted);font-size:12px;font-weight:800;width:22px;height:22px;padding:0;flex-shrink:0;line-height:1;cursor:pointer}
 .q-notes:active{color:var(--orange);border-color:var(--orange)}
 .q-del{background:none;border:none;color:var(--muted);font-size:22px;padding:4px 6px;cursor:pointer;flex-shrink:0;line-height:1}
@@ -236,9 +241,11 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:-apple-
 .ph-row{display:flex;align-items:flex-start;gap:12px}
 .ph-art{width:56px;height:56px;border-radius:12px;object-fit:cover;background:var(--s3);flex-shrink:0}
 .ph-info{flex:1;min-width:0}
-.ph-name{font-size:14px;font-weight:700;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
-.ph-count{font-size:12px;color:var(--dim);margin-top:2px}
-.ph-desc{font-size:12px;color:var(--dim);margin-top:8px;line-height:1.4;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.ph-name{font-size:15px;font-weight:800;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.ph-meta{font-size:12px;color:var(--dim);margin-top:3px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.ph-count{font-size:11px;color:var(--orange);margin-top:5px;font-weight:700}
+.ph-desc{font-size:12px;color:var(--dim);margin-top:9px;line-height:1.45;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.ph-desc:empty{display:none}
 
 /* ── Hover states (mouse / trackpad only) ───────────────────────────────── */
 @media (hover: hover) {
@@ -338,6 +345,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:-apple-
         <img class="ph-art" id="ph-art" src="" alt="">
         <div class="ph-info">
           <div class="ph-name" id="ph-name"></div>
+          <div class="ph-meta" id="ph-meta"></div>
           <div class="ph-count" id="ph-count"></div>
           <button class="sub-btn" id="ph-sub-btn" onclick="toggleSubFromHeader()">Subscribe</button>
         </div>
@@ -759,7 +767,7 @@ function getSearchResult(collectionId) {
 }
 
 function toggleSubFromSearchResult(p, btn) {
-  toggleSub(p.collectionId, p.collectionName, p.artworkUrl600 || p.artworkUrl100 || '', p.feedUrl || '', p.artistName || '', btn);
+  toggleSub(p.collectionId, p.collectionName, p.artworkUrl600 || p.artworkUrl100 || '', p.feedUrl || '', '', btn, p.artistName || '');
 }
 
 function openPodFromSearch(collectionId) {
@@ -770,11 +778,12 @@ function openPodFromSearch(collectionId) {
     name: p.collectionName,
     art: p.artworkUrl600 || p.artworkUrl100 || '',
     feedUrl: p.feedUrl || '',
-    desc: p.artistName || '',
+    desc: '',
+    author: p.artistName || '',
   });
 }
 
-function toggleSub(id, name, art, feedUrl, desc, btn) {
+function toggleSub(id, name, art, feedUrl, desc, btn, author = '') {
   const i = S.subs.findIndex(s => s.id === id);
   if (i > -1) {
     S.subs.splice(i, 1);
@@ -782,10 +791,10 @@ function toggleSub(id, name, art, feedUrl, desc, btn) {
     if (btn) { btn.textContent = '+ Subscribe'; btn.classList.remove('done'); }
     toast('Unsubscribed');
   } else {
-    S.subs.push({ id, name, art, feedUrl, desc });
+    S.subs.push({ id, name, art, feedUrl, desc, author });
     // Promote browse cache to persisted lib if available
     if (browseCache[id]) { S.lib[id] = browseCache[id]; delete browseCache[id]; }
-    else if (!S.lib[id]?.length) fetchFeed(id, feedUrl, { name, art });
+    else if (!S.lib[id]?.length) fetchFeed(id, feedUrl, { id, name, art, desc, author });
     if (btn) { btn.textContent = 'Subscribed'; btn.classList.add('done'); }
     toast('Subscribed!');
   }
@@ -861,6 +870,7 @@ function renderPodHeader(podId) {
   document.getElementById('ph-name').textContent = pod.name || '';
   const eps = getEps(podId);
   document.getElementById('ph-count').textContent = eps.length ? `${eps.length} episodes` : '';
+  document.getElementById('ph-meta').textContent = pod.author || '';
   document.getElementById('ph-desc').textContent = pod.desc || '';
   const btn = document.getElementById('ph-sub-btn');
   btn.textContent = subbed ? 'Subscribed' : '+ Subscribe';
@@ -871,7 +881,7 @@ function renderPodHeader(podId) {
 function toggleSubFromHeader() {
   if (!currentBrowsePod) return;
   const p = currentBrowsePod;
-  toggleSub(p.id, p.name, p.art, p.feedUrl, p.desc, null);
+  toggleSub(p.id, p.name, p.art, p.feedUrl, p.desc, null, p.author || '');
 }
 
 async function proxyFetch(feedUrl) {
@@ -914,12 +924,32 @@ async function fetchFeed(podId, feedUrl, podMeta = {}, persist = true) {
     const itns = 'http://www.itunes.com/dtds/podcast-1.0.dtd';
     // Parse channel-level description for the pod header
     const ch = xml.querySelector('channel');
+    const directChild = (parent, localName, ns = '') => Array.from(parent?.children || [])
+      .find(n => n.localName === localName && (!ns || n.namespaceURI === ns));
+    const rawAuthor = ch ? (
+      directChild(ch, 'author', itns)?.textContent?.trim()
+      || directChild(ch, 'author')?.textContent?.trim()
+      || directChild(ch, 'managingEditor')?.textContent?.trim()
+      || ''
+    ) : '';
+    const rawChDesc = ch ? (directChild(ch, 'encoded', 'http://purl.org/rss/1.0/modules/content/')
+      || directChild(ch, 'summary', itns)
+      || directChild(ch, 'description'))?.textContent?.trim() || '' : '';
+    const chDesc = feedText(rawChDesc);
     if (ch && currentBrowsePod?.id === podId) {
-      const rawChDesc = (ch.getElementsByTagNameNS('http://purl.org/rss/1.0/modules/content/','encoded')[0]
-        || ch.getElementsByTagNameNS(itns,'summary')[0]
-        || Array.from(ch.children).find(n => n.localName === 'description'))?.textContent?.trim() || '';
-      const chDesc = feedText(rawChDesc);
-      if (chDesc) document.getElementById('ph-desc').textContent = chDesc;
+      if (rawAuthor) {
+        currentBrowsePod.author = decodeEntities(rawAuthor);
+        document.getElementById('ph-meta').textContent = currentBrowsePod.author;
+      }
+      if (chDesc) {
+        currentBrowsePod.desc = chDesc;
+        document.getElementById('ph-desc').textContent = chDesc;
+      }
+    }
+    const subPod = S.subs.find(s => s.id === podId);
+    if (subPod) {
+      if (rawAuthor) subPod.author = decodeEntities(rawAuthor);
+      if (chDesc) subPod.desc = chDesc;
     }
     const items = xml.querySelectorAll('item');
     const eps = Array.from(items).map((item, i) => {
@@ -955,6 +985,9 @@ async function fetchFeed(podId, feedUrl, podMeta = {}, persist = true) {
         epNum,
         desc,
         chaptersUrl,
+        podFeedUrl: pod?.feedUrl || feedUrl,
+        podAuthor: pod?.author || '',
+        podDesc: pod?.desc || chDesc || '',
       };
     }).filter(Boolean);
     if (persist) { S.lib[podId] = eps; save(); }
@@ -1260,20 +1293,36 @@ function renderQueue() {
   el.innerHTML = S.queue.map((ep, i) => {
     const meta = [ep.epNum ? `Ep ${ep.epNum}` : '', ep.date].filter(Boolean).join(' · ');
     const sel = queueEditMode && queueSelected.has(i);
+    const statuses = queueStatusChips(ep, i);
     return `
     <div class="q-item${i===S.qi&&!queueEditMode?' now':''}${sel?' q-sel':''}" data-qi="${i}" onclick="${queueEditMode ? `toggleQueueSelect(${i})` : `playAt(${i},event)`}">
       ${queueEditMode
         ? `<div class="q-check">${sel ? '✓' : ''}</div>`
         : `<div class="q-num">${i===S.qi ? '▶' : i+1}</div>`}
-      <img class="q-art" src="${esc(ep.art)}" alt="" loading="lazy">
+      <img class="q-art" src="${esc(ep.art)}" alt="" loading="lazy" title="Open show" onclick="openQueueShow(event,${i})">
       <div class="q-info">
         <div class="q-title">${esc(ep.title)}</div>
         <div class="q-show">${esc(ep.podName)}</div>
         ${meta ? `<div class="q-meta">${esc(meta)}</div>` : ''}
+        ${statuses}
       </div>
       ${queueEditMode ? '' : `<button class="q-notes" aria-label="Show notes" onclick="openQueueNotes(event,${i})">i</button><button class="q-drag" aria-label="Reorder">⠿</button><button class="q-del" onclick="delFromQueue(event,${i})">×</button>`}
     </div>`;
   }).join('');
+}
+
+function queueStatusChips(ep, i) {
+  const chips = [];
+  const hasWp = S.waypoints.some(w => w.epId === ep.id);
+  const hasSleep = S.waypoints.some(w => w.epId === ep.id && (w.type === 'sleep' || String(w.label || '').toLowerCase().includes('sleep')));
+  const hasNotes = !!(ep.desc || (S.lib[ep.podId] || []).find(e => e.id === ep.id)?.desc);
+  if (i === S.qi) chips.push(['playing', audio.paused ? 'Current' : 'Playing']);
+  if (S.listened[ep.id]) chips.push(['listened', 'Listened']);
+  if (hasSleep) chips.push(['sleep', 'Sleep']);
+  else if (hasWp) chips.push(['', 'Waypoint']);
+  if (hasNotes) chips.push(['', 'Notes']);
+  if (!chips.length) return '';
+  return `<div class="q-status">${chips.map(([cls, label]) => `<span class="q-chip${cls ? ' '+cls : ''}">${label}</span>`).join('')}</div>`;
 }
 
 function purgeWaypoints(epIds) {
@@ -1294,10 +1343,29 @@ function openQueueNotes(ev, i) {
   openEpSheet(ep);
 }
 
+function openQueueShow(ev, i) {
+  ev.stopPropagation();
+  if (queueEditMode) { toggleQueueSelect(i); return; }
+  const ep = S.queue[i];
+  if (!ep) return;
+  const sub = S.subs.find(s => s.id === ep.podId);
+  if (sub) { showEpisodes(ep.podId); return; }
+  const eps = getEps(ep.podId);
+  const sample = eps.find(e => e.id === ep.id) || ep;
+  showEpisodes(ep.podId, {
+    id: ep.podId,
+    name: ep.podName || sample.podName || 'Podcast',
+    art: sample.art || ep.art || '',
+    feedUrl: sample.podFeedUrl || ep.podFeedUrl || '',
+    desc: sample.podDesc || ep.podDesc || '',
+    author: sample.podAuthor || ep.podAuthor || '',
+  });
+}
+
 let qDragJustEnded = false;
 function playAt(i, e) {
   if (qDragJustEnded) return;
-  if (e && e.target.closest('.q-drag,.q-notes')) return;
+  if (e && e.target.closest('.q-drag,.q-notes,.q-art')) return;
   S.qi = i;
   const ep = S.queue[i];
   S.pos = (ep && S.positions[ep.id]) || 0;
@@ -1308,6 +1376,39 @@ function playAt(i, e) {
 // ── Queue drag-to-reorder ─────────────────────────────────────────────────────
 let qd = null;
 const qList = document.getElementById('queue-list');
+const Q_DRAG_SCROLL_ZONE = 72;
+
+function autoScrollQueueDrag(y) {
+  const r = qList.getBoundingClientRect();
+  let delta = 0;
+  if (y < r.top + Q_DRAG_SCROLL_ZONE) delta = -Math.ceil((Q_DRAG_SCROLL_ZONE - (y - r.top)) / 4);
+  else if (y > r.bottom - Q_DRAG_SCROLL_ZONE) delta = Math.ceil((Q_DRAG_SCROLL_ZONE - (r.bottom - y)) / 4);
+  if (delta) qList.scrollTop += delta;
+}
+
+function updateQueueDragTarget(y) {
+  if (!qd) return;
+  autoScrollQueueDrag(y);
+  qd.ghost.style.top = (y - qd.offsetY) + 'px';
+
+  // Only measure real items (exclude the collapsed dragged item)
+  const items = Array.from(document.querySelectorAll('#queue-list .q-item')).filter(el => el !== qd.item);
+  let target = 0;
+  items.forEach((el, i) => {
+    const r = el.getBoundingClientRect();
+    if (y > r.top + r.height / 2) target = i + 1;
+  });
+  const newTarget = Math.min(Math.max(0, target), items.length);
+
+  if (newTarget !== qd.targetIdx) {
+    qd.targetIdx = newTarget;
+    if (newTarget >= items.length) {
+      items[items.length - 1]?.after(qd.ph);
+    } else {
+      items[newTarget].before(qd.ph);
+    }
+  }
+}
 
 qList.addEventListener('touchstart', e => {
   const handle = e.target.closest('.q-drag');
@@ -1341,26 +1442,7 @@ qList.addEventListener('touchstart', e => {
 
 qList.addEventListener('touchmove', e => {
   if (!qd) return;
-  const y = e.touches[0].clientY;
-  qd.ghost.style.top = (y - qd.offsetY) + 'px';
-
-  // Only measure real items (exclude the collapsed dragged item)
-  const items = Array.from(document.querySelectorAll('#queue-list .q-item')).filter(el => el !== qd.item);
-  let target = 0;
-  items.forEach((el, i) => {
-    const r = el.getBoundingClientRect();
-    if (y > r.top + r.height / 2) target = i + 1;
-  });
-  const newTarget = Math.min(Math.max(0, target), items.length);
-
-  if (newTarget !== qd.targetIdx) {
-    qd.targetIdx = newTarget;
-    if (newTarget >= items.length) {
-      items[items.length - 1]?.after(qd.ph);
-    } else {
-      items[newTarget].before(qd.ph);
-    }
-  }
+  updateQueueDragTarget(e.touches[0].clientY);
 }, { passive: true });
 
 function finishQDrag() {
@@ -1413,17 +1495,7 @@ qList.addEventListener('pointerdown', e => {
   qd = { idx, targetIdx: idx, item, ghost, ph, offsetY: e.clientY - rect.top };
   function onMove(ev) {
     if (!qd) return;
-    const y = ev.clientY;
-    qd.ghost.style.top = (y - qd.offsetY) + 'px';
-    const items = Array.from(document.querySelectorAll('#queue-list .q-item')).filter(el => el !== qd.item);
-    let target = 0;
-    items.forEach((el, i) => { if (y > el.getBoundingClientRect().top + el.getBoundingClientRect().height / 2) target = i + 1; });
-    const newTarget = Math.min(Math.max(0, target), items.length);
-    if (newTarget !== qd.targetIdx) {
-      qd.targetIdx = newTarget;
-      if (newTarget >= items.length) items[items.length-1]?.after(qd.ph);
-      else items[newTarget].before(qd.ph);
-    }
+    updateQueueDragTarget(ev.clientY);
   }
   function onUp() { finishQDrag(); document.removeEventListener('pointermove', onMove); document.removeEventListener('pointerup', onUp); }
   document.addEventListener('pointermove', onMove);

@@ -107,7 +107,7 @@ GitHub Pages usually updates in about a minute.
 - **Scrubber too sensitive** — requires dx > dy × 1.5 and min 6px horizontal before activating
 - **Pinch zoom** — disabled via `maximum-scale=1.0, user-scalable=no` in viewport meta
 - **Mini player click not firing** — removed touchstart/touchend handlers that were eating clicks; single `click` listener only
-- **Lock screen play unreliable** — removed JS play/pause handlers from Media Session; let iOS drive natively
+- **Lock screen playback boundary clarified** — episode auto-advance works while locked; play/resume after pausing from the lock screen remains an iOS web limitation
 - **Carousel freezes mid-animation** — touching during a CSS transition froze the slider; fixed by snapping to correct position on touchstart
 - **Show notes not appearing for some feeds** — iTunes RSS uses `content:encoded` for full notes; now checked first before `itunes:summary` and `description`
 - **iOS keyboard not appearing on filter inputs** — `type="search"` + dynamically shown views don't trigger keyboard; use `type="text" inputmode="search"`
@@ -127,7 +127,7 @@ GitHub Pages usually updates in about a minute.
 
 ## Known iOS limitations (not fixable for web apps)
 
-- **Lock screen play button unreliable** — `audio.play()` from JS context is blocked by iOS. Requires `AVAudioSession` (native app only).
+- **Lock screen play/resume after pausing is unreliable** — `audio.play()` from a background JS context may be blocked by iOS. Episode auto-advance while locked works; full play/resume control requires `AVAudioSession` (native app only).
 - **Background audio** — works while screen is on; may cut on lock depending on iOS version. Add to home screen for best behaviour.
 
 ---
@@ -135,3 +135,9 @@ GitHub Pages usually updates in about a minute.
 ## Adding to iPhone home screen
 
 Safari → Share → "Add to Home Screen" — gives better audio session handling than running in browser tab.
+
+---
+
+## License
+
+© 2026 Apollo13th. All rights reserved.
