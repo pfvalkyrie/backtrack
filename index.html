@@ -2351,8 +2351,11 @@ function setCarouselPanel(index, animate = true) {
   updateCarouselBtns();
   if (index === 0) {
     setTimeout(() => {
-      const cur = document.querySelector('#fp-chapters .ch-current');
-      if (cur) cur.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const chDiv = document.getElementById('fp-chapters');
+      const cur = chDiv?.querySelector('.ch-current');
+      if (cur && chDiv) {
+        chDiv.scrollTop = Math.max(0, cur.offsetTop - (chDiv.clientHeight - cur.offsetHeight) / 2);
+      }
     }, animate ? 360 : 0);
   }
 }
