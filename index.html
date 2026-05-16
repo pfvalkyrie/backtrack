@@ -578,6 +578,7 @@ let currentView = 'queue';
 let episodePodcastId = null;
 let browseCache = {};       // temp feed cache for unsubscribed shows (not persisted)
 let currentBrowsePod = null; // { id, name, art, feedUrl, desc } for current episode view
+const epRawDescCache = new Map(); // session-only: rawDesc keyed by ep.id for lazy sanitization
 let episodeSourceView = 'library'; // which tab to return to on back
 let sheetEp = null;         // episode open in detail sheet
 let lastSearchResults = []; // cache of last iTunes search results
@@ -646,15 +647,19 @@ function sanitizeHtml(html) {
   tmp.innerHTML = html;
   const safe = new Set(['p','br','a','strong','b','em','i','u','ul','ol','li','blockquote','code','pre','h1','h2','h3','h4','h5','h6','span','div','section','article']);
   const drop = new Set(['script','style','iframe','object','embed','form','input','button','select','textarea','link','meta','base','noscript']);
-  function walk(el) {
+  // Iterative BFS — no recursion, no stack overflow on deeply nested notes
+  const queue = [tmp];
+  while (queue.length) {
+    const el = queue.shift();
     Array.from(el.childNodes).forEach(node => {
-      if (node.nodeType === 3) return;
-      if (node.nodeType !== 1) { node.remove(); return; }
+      if (node.nodeType !== 1) return;
       const tag = node.tagName.toLowerCase();
       if (drop.has(tag)) { node.remove(); return; }
       if (!safe.has(tag)) {
-        while (node.firstChild) el.insertBefore(node.firstChild, node);
+        const kids = [];
+        while (node.firstChild) { kids.push(node.firstChild); el.insertBefore(node.firstChild, node); }
         node.remove();
+        kids.forEach(k => { if (k.nodeType === 1) queue.push(k); });
         return;
       }
       Array.from(node.attributes).forEach(a => {
@@ -665,14 +670,11 @@ function sanitizeHtml(html) {
         if (href.startsWith('http://') || href.startsWith('https://')) {
           node.setAttribute('target', '_blank');
           node.setAttribute('rel', 'noopener noreferrer');
-        } else {
-          node.removeAttribute('href');
-        }
+        } else { node.removeAttribute('href'); }
       }
-      walk(node);
+      queue.push(node);
     });
   }
-  walk(tmp);
   return tmp.innerHTML.trim();
 }
 
@@ -729,9 +731,19 @@ function nav(view) {
 
   // Library tab: restore last library sub-view instead of always going to list
   if (view === 'library') {
-    // Already in library context and not explicitly navigating to list — nothing to do
-    if (currentView === 'library' || (currentView === 'episodes' && episodeSourceView === 'library' && libSubView !== 'list')) return;
-    // Restore episode view if that's where we left off in the library
+    if (currentView === 'library') return;
+    // Tapping Library tab while on an episode list always drops back to the library list
+    if (currentView === 'episodes') {
+      libSubView = 'list';
+      currentView = 'library';
+      document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+      document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t.dataset.v === 'library'));
+      document.getElementById('v-library').classList.add('active');
+      renderLibrary();
+      requestAnimationFrame(() => { document.getElementById('library-list').scrollTop = savedLibScrollTop; });
+      return;
+    }
+    // Coming from another tab: restore episode sub-view if that's where we left off in library
     if (libSubView === 'episodes' && episodePodcastId !== null) {
       currentView = 'episodes';
       document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
@@ -740,7 +752,6 @@ function nav(view) {
       requestAnimationFrame(() => { document.getElementById('ep-list').scrollTop = savedEpScrollTop; });
       return;
     }
-    // Otherwise show the library list and restore its scroll
     currentView = 'library';
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
     document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t.dataset.v === 'library'));
@@ -1067,7 +1078,6 @@ async function fetchFeed(podId, feedUrl, podMeta = {}, persist = true) {
       const epNum = item.getElementsByTagNameNS(itns, 'episode')[0]?.textContent?.trim() || '';
       const rawDesc = (item.getElementsByTagNameNS('http://purl.org/rss/1.0/modules/content/','encoded')[0] || item.getElementsByTagNameNS(itns,'summary')[0] || item.querySelector('description'))?.textContent?.trim() || '';
       const desc = feedText(rawDesc);
-      const descHtml = sanitizeHtml(rawDesc);
       const chaptersNode = item.getElementsByTagNameNS('https://podcastindex.org/namespace/1.0','chapters')[0]
         || Array.from(item.getElementsByTagName('*')).find(n => n.localName === 'chapters' && n.hasAttribute('url'));
       const chaptersUrl = chaptersNode?.getAttribute('url') || '';
@@ -1077,6 +1087,7 @@ async function fetchFeed(podId, feedUrl, podMeta = {}, persist = true) {
       const guid = item.querySelector('guid')?.textContent?.trim() || '';
       const stableKey = guid || audioUrl || (rawTitle + pub);
       const id = `${podId}_${hashStr(stableKey)}`;
+      epRawDescCache.set(id, rawDesc);
       return {
         id,
         podId,
@@ -1084,7 +1095,6 @@ async function fetchFeed(podId, feedUrl, podMeta = {}, persist = true) {
         art,
         title,
         audioUrl,
-        descHtml,
         dur: parseDur(dur.trim()),
         date: pub ? new Date(pub).toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'}) : '',
         epNum,
@@ -1208,7 +1218,8 @@ function openEpSheet(ep) {
   const meta = [ep.epNum ? `Ep ${ep.epNum}` : '', ep.date, ep.dur ? ft(ep.dur) : ''].filter(Boolean).join(' · ');
   document.getElementById('eps-meta').textContent = meta;
   const epsDescEl = document.getElementById('eps-desc');
-  if (ep.descHtml) { epsDescEl.innerHTML = ep.descHtml; } else { epsDescEl.textContent = ep.desc || 'No show notes available.'; }
+  const epDescHtml = sanitizeHtml(epRawDescCache.get(ep.id) || '');
+  if (epDescHtml) { epsDescEl.innerHTML = epDescHtml; } else { epsDescEl.textContent = ep.desc || 'No show notes available.'; }
   const qIdx = S.queue.findIndex(q => q.id === ep.id);
   const inQ = qIdx !== -1;
   const isCurrent = inQ && qIdx === S.qi;
@@ -1913,9 +1924,9 @@ function updateFP() {
   document.getElementById('fp-show').textContent = ep.podName;
   document.querySelectorAll('.spd-btn').forEach(b => b.classList.toggle('on', parseFloat(b.dataset.s) === S.speed));
   const desc = ep.desc || (S.lib[ep.podId] || []).find(e => e.id === ep.id)?.desc || '';
-  const descHtml = ep.descHtml || (S.lib[ep.podId] || []).find(e => e.id === ep.id)?.descHtml || '';
+  const fpDescHtml = sanitizeHtml(epRawDescCache.get(ep.id) || '');
   const fpNotes = document.getElementById('fp-notes');
-  if (descHtml) { fpNotes.innerHTML = descHtml; } else { fpNotes.textContent = desc || 'No show notes available.'; }
+  if (fpDescHtml) { fpNotes.innerHTML = fpDescHtml; } else { fpNotes.textContent = desc || 'No show notes available.'; }
   setCarouselPanel(1, false);
   loadChapters(ep);
   updateProgress();
