@@ -2279,8 +2279,20 @@ function updateChapterHighlight() {
   }
 
   if (cur !== lastHighlightedChapter) {
+    // Revert old chapter meta to static duration label
+    const oldIdx = lastHighlightedChapter;
+    const oldCh = currentChapters[oldIdx];
+    if (oldCh) {
+      const oldNext = currentChapters[oldIdx + 1];
+      const epDurO = S.queue[S.qi]?.dur || audio.duration || 0;
+      const oldEnd = oldCh.endTime ?? oldNext?.startTime ?? (oldIdx === currentChapters.length - 1 ? epDurO : null);
+      const oldDurSec = oldEnd != null ? Math.max(0, oldEnd - oldCh.startTime) : null;
+      const oldDurLabel = oldDurSec != null ? (oldDurSec >= 60 ? `${Math.round(oldDurSec/60)}m` : `${Math.round(oldDurSec)}s`) : '';
+      const oldMeta = document.getElementById(`ch-meta-${oldIdx}`);
+      if (oldMeta) oldMeta.textContent = `${ft(oldCh.startTime)}${oldDurLabel ? ' · ' + oldDurLabel : ''}`;
+    }
     // Reset previous chapter's progress bar immediately
-    const oldFill = document.getElementById(`ch-prog-${lastHighlightedChapter}`);
+    const oldFill = document.getElementById(`ch-prog-${oldIdx}`);
     if (oldFill) { oldFill.style.transition = 'none'; oldFill.style.width = '0%'; }
     lastHighlightedChapter = cur;
     currentChapters.forEach((_, i) => {
@@ -2337,6 +2349,12 @@ function setCarouselPanel(index, animate = true) {
   document.getElementById('art-dot-1').classList.toggle('on', index === 1);
   document.getElementById('art-dot-2').classList.toggle('on', index === 2);
   updateCarouselBtns();
+  if (index === 0) {
+    setTimeout(() => {
+      const cur = document.querySelector('#fp-chapters .ch-current');
+      if (cur) cur.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, animate ? 360 : 0);
+  }
 }
 
 artWrap.addEventListener('touchstart', e => {
@@ -2608,12 +2626,19 @@ function toggleWpSelect(id) {
   }
 }
 
+function exitWpEdit() {
+  wpEditMode = false;
+  wpSelected.clear();
+  const btn = document.getElementById('wp-edit-btn');
+  if (btn) btn.textContent = 'Edit';
+  document.getElementById('wp-edit-bar').classList.remove('visible');
+}
+
 function removeWpSelected() {
   const ids = new Set(wpSelected);
   S.waypoints = S.waypoints.filter(w => !ids.has(w.id));
   save();
-  wpSelected.clear();
-  wpEditMode = false;
+  exitWpEdit();
   renderWaypoints();
   renderQueue();
 }
@@ -2621,8 +2646,7 @@ function removeWpSelected() {
 function clearAllWaypoints() {
   S.waypoints = [];
   save();
-  wpSelected.clear();
-  wpEditMode = false;
+  exitWpEdit();
   renderWaypoints();
   renderQueue();
 }
@@ -2630,12 +2654,15 @@ function clearAllWaypoints() {
 function renderWaypoints() {
   const el = document.getElementById('wp-list');
   const editBtn = document.getElementById('wp-edit-btn');
+  const editBar = document.getElementById('wp-edit-bar');
   if (!S.waypoints.length) {
     el.innerHTML = '<div class="empty"><div class="ico">⚑</div><p>No waypoints yet.<br>Tap ⚑ in the player to mark a moment.</p></div>';
-    if (editBtn) editBtn.style.display = 'none';
+    if (editBtn) { editBtn.style.display = 'none'; editBtn.textContent = 'Edit'; }
+    if (editBar) editBar.classList.remove('visible');
     return;
   }
-  if (editBtn) editBtn.style.display = '';
+  if (editBtn) { editBtn.style.display = ''; editBtn.textContent = wpEditMode ? 'Done' : 'Edit'; }
+  if (editBar) editBar.classList.toggle('visible', wpEditMode);
   el.innerHTML = S.waypoints.map(wp => {
     const isSleep = wp.type === 'sleep' || String(wp.label || '').toLowerCase().includes('sleep');
     const sel = wpEditMode && wpSelected.has(wp.id);
