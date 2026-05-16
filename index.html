@@ -591,7 +591,8 @@ function load() {
   catch { return {...DEF}; }
 }
 function save() {
-  try { localStorage.setItem(STORE_KEY, JSON.stringify(S)); } catch {}
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(S)); }
+  catch(e) { console.error('Save failed:', e); toast('Warning: data could not be saved'); }
 }
 
 function getEps(podId) {
@@ -917,7 +918,7 @@ function renderLibrary() {
     return;
   }
   el.innerHTML = subs.map(p => `
-    <div class="lib-card" onclick="showEpisodes(${p.id})">
+    <div class="lib-card" onclick="showEpisodes(${JSON.stringify(p.id)})">
       <img class="lib-art" src="${esc(p.art)}" alt="" loading="lazy">
       <div class="lib-info">
         <div class="lib-name">${esc(p.name)}</div>
