@@ -42,7 +42,6 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:-apple-
 .search-row input:focus{border-color:var(--orange)}
 .search-row input::placeholder{color:var(--muted)}
 .search-row button{background:var(--gradient);border:none;border-radius:13px;color:#000;font-size:15px;font-weight:700;padding:0 18px;cursor:pointer;flex-shrink:0}
-.rss-divider{text-align:center;color:var(--muted);font-size:12px;padding:0 16px 8px;flex-shrink:0}
 
 /* Cards */
 .pod-card{display:flex;align-items:flex-start;gap:12px;background:var(--s1);border-radius:20px;padding:14px;margin-bottom:10px}
@@ -338,13 +337,8 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:-apple-
   <div id="v-search" class="view">
     <div class="vhead"><h1 id="app-title">Backtrack</h1></div>
     <div class="search-row">
-      <input id="search-input" type="search" placeholder="Search podcasts…" autocomplete="off" autocorrect="off" spellcheck="false" inputmode="search">
+      <input id="search-input" type="search" placeholder="Search or paste RSS URL…" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" inputmode="search">
       <button id="search-btn">Go</button>
-    </div>
-    <div class="rss-divider">or add a private feed</div>
-    <div class="search-row">
-      <input id="rss-input" type="text" inputmode="url" placeholder="Paste RSS feed URL…" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false">
-      <button id="rss-btn">Add</button>
     </div>
     <div class="scroll-area" id="search-results">
       <div class="empty"><div class="ico">🎙</div><p>Search for your favourite podcasts</p></div>
@@ -789,8 +783,6 @@ document.getElementById('ep-filter').addEventListener('input', () => { if (episo
 // ── Search ────────────────────────────────────────────────────────────────────
 document.getElementById('search-btn').addEventListener('click', doSearch);
 document.getElementById('search-input').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
-document.getElementById('rss-btn').addEventListener('click', () => openPodFromRss(document.getElementById('rss-input').value));
-document.getElementById('rss-input').addEventListener('keydown', e => { if (e.key === 'Enter') openPodFromRss(document.getElementById('rss-input').value); });
 
 // Long-press "Backtrack" title to clear all local data (dev reset)
 let _resetTimer = null;
@@ -820,6 +812,7 @@ document.getElementById('search-results').addEventListener('click', e => {
 async function doSearch() {
   const q2 = document.getElementById('search-input').value.trim();
   if (!q2) return;
+  if (q2.startsWith('http://') || q2.startsWith('https://')) { openPodFromRss(q2); return; }
   const el = document.getElementById('search-results');
   el.innerHTML = '<div class="loading-msg">Searching…</div>';
   try {
@@ -874,12 +867,8 @@ function openPodFromSearch(collectionId) {
 function openPodFromRss(rawUrl) {
   const feedUrl = (rawUrl || '').trim();
   if (!feedUrl) return;
-  if (!feedUrl.startsWith('http://') && !feedUrl.startsWith('https://')) {
-    toast('URL must start with http:// or https://');
-    return;
-  }
+  document.getElementById('search-input').value = '';
   const podId = 'rss_' + hashStr(feedUrl);
-  document.getElementById('rss-input').value = '';
   showEpisodes(podId, { id: podId, name: '', art: '', feedUrl, desc: '', author: '' });
 }
 
@@ -958,7 +947,7 @@ function showEpisodes(podId, podMeta) {
   } else {
     el.innerHTML = '<div class="loading-msg">Loading episodes…</div>';
     const persist = S.subs.some(s => s.id === podId);
-    fetchFeed(podId, currentBrowsePod.feedUrl, currentBrowsePod, persist).then(() => renderEps(podId));
+    fetchFeed(podId, currentBrowsePod.feedUrl, currentBrowsePod, persist).then(() => { renderEps(podId); renderPodHeader(podId); });
   }
 }
 
@@ -1108,9 +1097,8 @@ async function fetchFeed(podId, feedUrl, podMeta = {}, persist = true) {
     }).filter(Boolean);
     if (persist) { S.lib[podId] = eps; save(); }
     else { browseCache[podId] = eps; }
-    // Update episode count and re-render header (picks up name/art for RSS-only pods)
     if (currentBrowsePod?.id === podId) {
-      renderPodHeader(podId);
+      document.getElementById('ph-count').textContent = `${eps.length} episodes`;
     }
     // Re-trigger chapters for the playing episode when feed is refreshed externally
     const curEp = S.queue[S.qi];
