@@ -999,15 +999,13 @@ async function proxyFetch(feedUrl) {
 
   // Try proxies one at a time so private-ish feed URLs are not sprayed to every fallback.
   const proxies = [
-    u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
-    u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
     u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
-    u => `https://thingproxy.freeboard.io/fetch/${u}`,
-    u => `https://api.allorigins.win/get?url=${encodeURIComponent(u)}`,
+    u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+    u => `https://api.cors.lol/?url=${encodeURIComponent(u)}`,
   ];
 
   async function tryProxy(makeUrl) {
-    const r = await fetch(makeUrl(feedUrl), { signal: abortIn(20000) });
+    const r = await fetch(makeUrl(feedUrl), { signal: abortIn(12000) });
     if (!r.ok) throw new Error(`${r.status}`);
     const text = await r.text();
     if (text.startsWith('{') && text.includes('"contents"')) return JSON.parse(text).contents;
