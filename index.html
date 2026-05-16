@@ -958,7 +958,7 @@ function showEpisodes(podId, podMeta) {
   } else {
     el.innerHTML = '<div class="loading-msg">Loading episodes…</div>';
     const persist = S.subs.some(s => s.id === podId);
-    fetchFeed(podId, currentBrowsePod.feedUrl, currentBrowsePod, persist).then(() => { renderEps(podId); renderPodHeader(podId); });
+    fetchFeed(podId, currentBrowsePod.feedUrl, currentBrowsePod, persist).then(ok => { if (ok !== false) { renderEps(podId); renderPodHeader(podId); } });
   }
 }
 
@@ -984,10 +984,16 @@ function toggleSubFromHeader() {
   toggleSub(p.id, p.name, p.art, p.feedUrl, p.desc, null, p.author || '');
 }
 
+function abortIn(ms) {
+  const c = new AbortController();
+  setTimeout(() => c.abort(), ms);
+  return c.signal;
+}
+
 async function proxyFetch(feedUrl) {
   // Try direct first — Megaphone and many hosts allow CORS
   try {
-    const r = await fetch(feedUrl, { signal: AbortSignal.timeout(15000) });
+    const r = await fetch(feedUrl, { signal: abortIn(15000) });
     if (r.ok) return await r.text();
   } catch {}
 
@@ -1001,7 +1007,7 @@ async function proxyFetch(feedUrl) {
   ];
 
   async function tryProxy(makeUrl) {
-    const r = await fetch(makeUrl(feedUrl), { signal: AbortSignal.timeout(20000) });
+    const r = await fetch(makeUrl(feedUrl), { signal: abortIn(20000) });
     if (!r.ok) throw new Error(`${r.status}`);
     const text = await r.text();
     if (text.startsWith('{') && text.includes('"contents"')) return JSON.parse(text).contents;
@@ -1116,9 +1122,12 @@ async function fetchFeed(podId, feedUrl, podMeta = {}, persist = true) {
       const freshEp = eps.find(e => e.id === curEp.id);
       if (freshEp) { chaptersEpId = null; loadChapters(freshEp); }
     }
+    return true;
   } catch(e) {
     console.error('Feed error', e);
+    toast('Couldn\'t load feed. Check your connection.');
     document.getElementById('ep-list').innerHTML = '<div class="empty"><p>Couldn\'t load episodes. Check your connection and try again.</p></div>';
+    return false;
   }
 }
 
@@ -2015,7 +2024,7 @@ function withTimeout(promise, ms, label) {
 
 async function fetchJson(url) {
   async function tryUrl(u) {
-    const r = await fetch(u, { signal: AbortSignal.timeout(15000) });
+    const r = await fetch(u, { signal: abortIn(15000) });
     if (!r.ok) throw new Error(r.status);
     const text = await r.text();
     // allorigins /get wraps response in {"contents":"..."}
@@ -2102,7 +2111,7 @@ async function loadChaptersFromId3(audioUrl) {
     try {
       // Attempt 1: plain GET. We cancel after the ID3 tag, so this does not
       // download the whole MP3 on streaming-capable browsers.
-      const r = await fetch(url, { signal: AbortSignal.timeout(25000) });
+      const r = await fetch(url, { signal: abortIn(25000) });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       buf = await readHead(r);
       break;
@@ -2110,7 +2119,7 @@ async function loadChaptersFromId3(audioUrl) {
       try {
         // Attempt 2: bounded range request. This also helps Safari when fetch
         // streams are unavailable and handles large ID3 tags from Relay/ATP.
-        const r = await fetch(url, { headers: { Range: `bytes=0-${MAX_ID3_BYTES - 1}` }, signal: AbortSignal.timeout(25000) });
+        const r = await fetch(url, { headers: { Range: `bytes=0-${MAX_ID3_BYTES - 1}` }, signal: abortIn(25000) });
         if (!r.ok && r.status !== 206) throw new Error(`HTTP ${r.status}`);
         buf = new Uint8Array(await r.arrayBuffer());
         break;
