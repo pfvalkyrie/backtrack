@@ -21,7 +21,7 @@ struct FeedService {
                 name: item.collectionName,
                 author: item.artistName,
                 desc: "",
-                artUrl: item.artworkUrl600 ?? item.artworkUrl100,
+                artUrl: cleanURLString(item.artworkUrl600 ?? item.artworkUrl100),
                 feedUrl: feedUrl
             )
         }
@@ -33,6 +33,12 @@ struct FeedService {
         guard let url = URL(string: podcast.feedUrl) else { throw URLError(.badURL) }
         let data = try await fetchData(from: url)
         return RSSParser().parse(data: data, podcast: podcast)
+    }
+
+    static func fetchPodcastDetails(podcast: Podcast) async throws -> Podcast {
+        guard let url = URL(string: podcast.feedUrl) else { throw URLError(.badURL) }
+        let data = try await fetchData(from: url)
+        return PodcastMetadataParser().parse(data: data, fallback: podcast)
     }
 
     // MARK: - JSON Chapters
@@ -165,9 +171,9 @@ struct FeedService {
     }
 
     private static func fetchData(from url: URL) async throws -> Data {
-        let (data, response) = try await URLSession.shared.data(from: url)
-        try validate(response)
-        return data
+        var request = URLRequest(url: url, timeoutInterval: 30)
+        request.setValue("Backtrack/1.0", forHTTPHeaderField: "User-Agent")
+        return try await fetchData(for: request)
     }
 
     private static func fetchData(for request: URLRequest) async throws -> Data {
@@ -180,6 +186,99 @@ struct FeedService {
         guard let http = response as? HTTPURLResponse else { return }
         guard (200..<300).contains(http.statusCode) else {
             throw URLError(.badServerResponse)
+        }
+    }
+
+    fileprivate static func cleanURLString(_ value: String) -> String {
+        let cleaned = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "&amp;", with: "&")
+            .replacingOccurrences(of: " ", with: "%20")
+        if cleaned.hasPrefix("http://") {
+            return "https://" + cleaned.dropFirst("http://".count)
+        }
+        return cleaned
+    }
+}
+
+// MARK: - Podcast Metadata Parser
+
+final class PodcastMetadataParser: NSObject, XMLParserDelegate {
+    private var fallback: Podcast!
+    private var buf = ""
+    private var isInItem = false
+    private var name = ""
+    private var author = ""
+    private var desc = ""
+    private var artUrl = ""
+    private var isInChannelImage = false
+
+    func parse(data: Data, fallback: Podcast) -> Podcast {
+        self.fallback = fallback
+        self.name = fallback.name
+        self.author = fallback.author
+        self.desc = fallback.desc
+        self.artUrl = fallback.artUrl
+        let parser = XMLParser(data: data)
+        parser.delegate = self
+        parser.parse()
+        return Podcast(
+            id: fallback.id,
+            name: name.isEmpty ? fallback.name : name,
+            author: author.isEmpty ? fallback.author : author,
+            desc: desc.isEmpty ? fallback.desc : desc,
+            artUrl: artUrl.isEmpty ? fallback.artUrl : FeedService.cleanURLString(artUrl),
+            feedUrl: fallback.feedUrl
+        )
+    }
+
+    func parser(_ parser: XMLParser, didStartElement el: String, namespaceURI: String?,
+                qualifiedName: String?, attributes a: [String: String] = [:]) {
+        buf = ""
+        let name = el.lowercased()
+        if name == "item" { isInItem = true }
+        if !isInItem, name == "image" { isInChannelImage = true }
+        guard !isInItem else { return }
+        if name == "itunes:image", let href = a["href"], !href.isEmpty {
+            artUrl = href
+        } else if (name == "media:thumbnail" || name == "media:content"),
+                  let url = a["url"], !url.isEmpty {
+            artUrl = url
+        }
+    }
+
+    func parser(_ parser: XMLParser, foundCharacters s: String) { buf += s }
+
+    func parser(_ parser: XMLParser, foundCDATA CDATABlock: Data) {
+        if let text = String(data: CDATABlock, encoding: .utf8) {
+            buf += text
+        }
+    }
+
+    func parser(_ parser: XMLParser, didEndElement el: String,
+                namespaceURI: String?, qualifiedName: String?) {
+        let text = buf.trimmingCharacters(in: .whitespacesAndNewlines)
+        defer { buf = "" }
+        let name = el.lowercased()
+        if name == "item" {
+            isInItem = false
+            return
+        }
+        if name == "image" {
+            isInChannelImage = false
+            return
+        }
+        guard !isInItem, !text.isEmpty else { return }
+        switch name {
+        case "title":
+            if !isInChannelImage, self.name.isEmpty || self.name == fallback.name { self.name = text }
+        case "itunes:author", "managingeditor":
+            if author.isEmpty || author == fallback.author { author = text }
+        case "description", "itunes:summary":
+            if desc.isEmpty || desc == fallback.desc { desc = text }
+        case "url":
+            if isInChannelImage { artUrl = text }
+        default:
+            break
         }
     }
 }
@@ -213,6 +312,7 @@ final class RSSParser: NSObject, XMLParserDelegate {
     private var buf = ""
     private var ep: EpBuf?
     private var inItem = false
+    private var inItemImage = false
 
     private class EpBuf {
         var title = ""; var guid = ""; var audioUrl = ""; var artUrl = ""
@@ -230,11 +330,15 @@ final class RSSParser: NSObject, XMLParserDelegate {
     func parser(_ parser: XMLParser, didStartElement el: String, namespaceURI: String?,
                 qualifiedName: String?, attributes a: [String: String] = [:]) {
         buf = ""
-        if el == "item" { inItem = true; ep = EpBuf() }
+        let name = el.lowercased()
+        if name == "item" { inItem = true; ep = EpBuf() }
         guard inItem else { return }
-        switch el {
+        if name == "image" { inItemImage = true }
+        switch name {
         case "enclosure":        ep?.audioUrl    = a["url"] ?? ""
         case "itunes:image":     ep?.artUrl      = a["href"] ?? ""
+        case "media:thumbnail",
+             "media:content":    ep?.artUrl      = a["url"] ?? ep?.artUrl ?? ""
         case "podcast:chapters": ep?.chaptersUrl = a["url"]
         default: break
         }
@@ -253,20 +357,21 @@ final class RSSParser: NSObject, XMLParserDelegate {
         let text = buf.trimmingCharacters(in: .whitespacesAndNewlines)
         defer { buf = "" }
         guard inItem, let ep else { return }
-        switch el {
+        let name = el.lowercased()
+        switch name {
         case "title":           ep.title    = text
         case "guid":            ep.guid     = text
         case "description":     if ep.desc.isEmpty { ep.desc = text }
         case "content:encoded": ep.descHtml = text
         case "itunes:duration": ep.duration = parseDuration(text)
-        case "pubDate":         ep.date     = parseDate(text) ?? Date()
+        case "pubdate":         ep.date     = parseDate(text) ?? Date()
         case "itunes:episode":  ep.epNum    = Int(text)
         case "item":
             inItem = false
             guard !ep.audioUrl.isEmpty else { return }
             let src  = ep.guid.isEmpty ? ep.audioUrl : ep.guid
             let epId = stableId(src, podId: podcast.id)
-            let art  = ep.artUrl.isEmpty ? podcast.artUrl : ep.artUrl
+            let art  = FeedService.cleanURLString(ep.artUrl.isEmpty ? podcast.artUrl : ep.artUrl)
             let html = ep.descHtml.isEmpty ? nil : ep.descHtml
             episodes.append(Episode(
                 id: epId, podId: podcast.id, podName: podcast.name,
@@ -278,6 +383,10 @@ final class RSSParser: NSObject, XMLParserDelegate {
                 feedUrl: podcast.feedUrl
             ))
             self.ep = nil
+        case "url":
+            if inItemImage { ep.artUrl = text }
+        case "image":
+            inItemImage = false
         default: break
         }
     }

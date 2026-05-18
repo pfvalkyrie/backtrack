@@ -1,4 +1,5 @@
 import UIKit
+import SwiftUI
 
 extension String {
     // True if the string contains HTML markup (vs Markdown plain text)
@@ -72,5 +73,103 @@ extension String {
         replacingOccurrences(of: ")", with: "%29")
             .replacingOccurrences(of: "(", with: "%28")
             .replacingOccurrences(of: " ", with: "%20")
+    }
+}
+
+struct RichPodcastText: View {
+    let text: String
+    var font: Font = .system(size: 13)
+    var foreground: Color = .sDim
+    var lineLimit: Int?
+    var textAlignment: TextAlignment = .leading
+
+    init(
+        _ text: String,
+        font: Font = .system(size: 13),
+        foreground: Color = .sDim,
+        lineLimit: Int? = nil,
+        textAlignment: TextAlignment = .leading
+    ) {
+        self.text = text
+        self.font = font
+        self.foreground = foreground
+        self.lineLimit = lineLimit
+        self.textAlignment = textAlignment
+    }
+
+    var body: some View {
+        Group {
+            if let attr = text.notesAttributedString {
+                Text(attr)
+                    .tint(.sOrange)
+            } else {
+                Text(text.strippingHTML)
+            }
+        }
+        .font(font)
+        .foregroundColor(foreground)
+        .multilineTextAlignment(textAlignment)
+        .lineLimit(lineLimit)
+    }
+}
+
+struct RemoteArtworkView: View {
+    let urls: [String]
+    var cornerRadius: CGFloat = 12
+
+    @State private var urlIndex = 0
+
+    private var candidates: [URL] {
+        urls
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .map { value in
+                value.hasPrefix("http://") ? "https://" + value.dropFirst("http://".count) : value
+            }
+            .filter { !$0.isEmpty }
+            .compactMap(URL.init(string:))
+    }
+
+    var body: some View {
+        Group {
+            if candidates.indices.contains(urlIndex) {
+                AsyncImage(url: candidates[urlIndex]) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().aspectRatio(contentMode: .fill)
+                    case .failure:
+                        fallbackOrPlaceholder
+                    case .empty:
+                        artworkPlaceholder
+                    @unknown default:
+                        artworkPlaceholder
+                    }
+                }
+                .id(candidates[urlIndex])
+                .onChange(of: urls) { _, _ in urlIndex = 0 }
+            } else {
+                artworkPlaceholder
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+    }
+
+    @ViewBuilder
+    private var fallbackOrPlaceholder: some View {
+        if urlIndex + 1 < candidates.count {
+            artworkPlaceholder
+                .task { urlIndex += 1 }
+        } else {
+            artworkPlaceholder
+        }
+    }
+
+    private var artworkPlaceholder: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: cornerRadius)
+                .fill(Color.sS3.opacity(0.72))
+            Image(systemName: "waveform")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(Color.sMuted)
+        }
     }
 }

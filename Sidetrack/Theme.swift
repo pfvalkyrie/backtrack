@@ -21,4 +21,30 @@ extension View {
     func gradientForeground() -> some View {
         self.overlay(LinearGradient.sGradient).mask(self)
     }
+
+    func glassSurface(cornerRadius: CGFloat = 18, tintOpacity: CGFloat = 0.58) -> some View {
+        self.background(
+            RoundedRectangle(cornerRadius: cornerRadius)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: cornerRadius)
+                        .fill(Color.sS1.opacity(tintOpacity))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: cornerRadius)
+                        .stroke(
+                            LinearGradient(
+                                colors: [
+                                    .white.opacity(0.22),
+                                    .white.opacity(0.05),
+                                    .sOrange.opacity(0.16)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 0.8
+                        )
+                )
+        )
+    }
 }

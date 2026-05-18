@@ -1,0 +1,29 @@
+.DS_Store
+
+# Xcode user state
+xcuserdata/
+*.xcuserstate
+
+# Build products
+build/
+DerivedData/
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Signing and provisioning
+*.mobileprovision
+*.provisionprofile
+*.p12
+*.p8
+*.cer
+
+# Secrets / local config
+.env
+.env.*
+!.env.example
+
+# Swift Package Manager
+.build/
+Package.resolved
+

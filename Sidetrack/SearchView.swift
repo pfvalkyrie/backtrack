@@ -15,7 +15,7 @@ struct SearchView: View {
                     .foregroundColor(.sOrange)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 10)
-                    .listRowBackground(Color.sS1)
+                    .listRowBackground(glassRowBackground)
                     .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
                     .listRowSeparator(.hidden)
             }
@@ -29,7 +29,7 @@ struct SearchView: View {
                 NavigationLink(destination: EpisodesView(podcast: podcast)) {
                     PodcastSearchRow(podcast: podcast)
                 }
-                .listRowBackground(Color.sS1)
+                .listRowBackground(glassRowBackground)
                 .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12))
                 .listRowSeparator(.hidden)
             }
@@ -66,12 +66,31 @@ struct SearchView: View {
         isLoading = true
         errorMessage = nil
         do {
-            results = try await FeedService.searchPodcasts(query)
+            let found = try await FeedService.searchPodcasts(query)
+            results = found
+            isLoading = false
+            await enrichResults(found)
+            return
         } catch {
             errorMessage = "Search failed. Check your connection."
             results = []
         }
         isLoading = false
+    }
+
+    func enrichResults(_ found: [Podcast]) async {
+        for podcast in found.prefix(12) {
+            guard let detailed = try? await FeedService.fetchPodcastDetails(podcast: podcast),
+                  let index = results.firstIndex(where: { $0.id == podcast.id }) else { continue }
+            results[index] = detailed
+        }
+    }
+
+    private var glassRowBackground: some View {
+        RoundedRectangle(cornerRadius: 16)
+            .fill(.ultraThinMaterial)
+            .overlay(RoundedRectangle(cornerRadius: 16).fill(Color.sS1.opacity(0.72)))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.1), lineWidth: 0.6))
     }
 }
 
@@ -99,6 +118,14 @@ private struct PodcastSearchRow: View {
                         .font(.system(size: 12))
                         .foregroundColor(.sDim)
                         .lineLimit(1)
+                }
+                if !podcast.desc.isEmpty {
+                    RichPodcastText(
+                        podcast.desc,
+                        font: .system(size: 12),
+                        foreground: .sDim,
+                        lineLimit: 2
+                    )
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

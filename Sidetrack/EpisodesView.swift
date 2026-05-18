@@ -9,8 +9,10 @@ struct EpisodesView: View {
     @State private var selectedEpisode: Episode?
     @State private var filter = ""
     @State private var errorMessage: String?
+    @State private var podcastDetails: Podcast?
 
     var isSubscribed: Bool { appState.isSubscribed(podcast.id) }
+    var displayPodcast: Podcast { podcastDetails ?? podcast }
 
     var filteredEpisodes: [Episode] {
         filter.isEmpty ? episodes : episodes.filter { $0.title.localizedCaseInsensitiveContains(filter) }
@@ -25,7 +27,7 @@ struct EpisodesView: View {
                 list
             }
         }
-        .navigationTitle(podcast.name)
+        .navigationTitle(displayPodcast.name)
         .navigationBarTitleDisplayMode(.large)
         .background(Color.black)
         .searchable(text: $filter, prompt: "Filter episodes")
@@ -64,7 +66,7 @@ struct EpisodesView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 10)
-                .listRowBackground(Color.sS1)
+                .listRowBackground(glassRowBackground)
                 .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 8, trailing: 12))
                 .listRowSeparator(.hidden)
             }
@@ -83,7 +85,7 @@ struct EpisodesView: View {
                 EpisodeRow(ep: ep,
                            isInQueue: appState.isInQueue(ep.id),
                            isListened: appState.listened[ep.id] == true)
-                    .listRowBackground(Color.sS1)
+                    .listRowBackground(glassRowBackground)
                     .listRowInsets(EdgeInsets(top: 2, leading: 12, bottom: 2, trailing: 12))
                     .listRowSeparator(.hidden)
                     .onTapGesture { selectedEpisode = ep }
@@ -95,30 +97,36 @@ struct EpisodesView: View {
         .refreshable { await loadEpisodes(forceRefresh: true) }
     }
 
+    private var glassRowBackground: some View {
+        RoundedRectangle(cornerRadius: 16)
+            .fill(.ultraThinMaterial)
+            .overlay(RoundedRectangle(cornerRadius: 16).fill(Color.sS1.opacity(0.72)))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.1), lineWidth: 0.6))
+    }
+
     var podcastHeader: some View {
         VStack(spacing: 12) {
-            AsyncImage(url: URL(string: podcast.artUrl)) { img in
-                img.resizable().aspectRatio(contentMode: .fill)
-            } placeholder: { Color.sS3 }
+            RemoteArtworkView(urls: appState.artworkCandidates(for: displayPodcast), cornerRadius: 20)
             .frame(width: 120, height: 120)
-            .clipShape(RoundedRectangle(cornerRadius: 20))
 
-            if !podcast.author.isEmpty {
-                Text(podcast.author)
+            if !displayPodcast.author.isEmpty {
+                Text(displayPodcast.author)
                     .font(.system(size: 13))
                     .foregroundColor(.sDim)
             }
-            if !podcast.desc.isEmpty {
-                Text(podcast.desc)
-                    .font(.system(size: 13))
-                    .foregroundColor(.sDim)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(3)
+            if !displayPodcast.desc.isEmpty {
+                RichPodcastText(
+                    displayPodcast.desc,
+                    font: .system(size: 13),
+                    foreground: .sDim,
+                    lineLimit: 4,
+                    textAlignment: .center
+                )
             }
 
             Button {
                 if isSubscribed { appState.unsubscribe(podcast.id) }
-                else { appState.subscribe(podcast) }
+                else { appState.subscribe(displayPodcast) }
             } label: {
                 Text(isSubscribed ? "Subscribed" : "Subscribe")
                     .font(.system(size: 13, weight: .bold))
@@ -139,12 +147,20 @@ struct EpisodesView: View {
 
     func loadEpisodes(forceRefresh: Bool = false) async {
         let cached = appState.episodesFor(podcast.id)
-        if !cached.isEmpty && !forceRefresh { episodes = cached }
-        isLoading = true
+        if !cached.isEmpty && !forceRefresh {
+            episodes = cached
+            isLoading = false
+        } else {
+            isLoading = true
+        }
         errorMessage = nil
+
+        let latestDetails = await refreshPodcastDetails()
+        let feedPodcast = latestDetails ?? podcastDetails ?? podcast
+
         do {
-            let fetched = try await FeedService.fetchFeed(podcast: podcast)
-            appState.storeFeed(fetched, for: podcast)
+            let fetched = try await FeedService.fetchFeed(podcast: feedPodcast)
+            appState.storeFeed(fetched, for: feedPodcast)
             episodes = fetched
         } catch {
             if episodes.isEmpty {
@@ -154,6 +170,16 @@ struct EpisodesView: View {
             }
         }
         isLoading = false
+    }
+
+    @discardableResult
+    func refreshPodcastDetails() async -> Podcast? {
+        guard let details = try? await FeedService.fetchPodcastDetails(podcast: podcast) else {
+            return nil
+        }
+        podcastDetails = details
+        appState.updatePodcastDetails(details)
+        return details
     }
 }
 
@@ -168,11 +194,8 @@ private struct EpisodeRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            AsyncImage(url: URL(string: ep.artUrl)) { img in
-                img.resizable().aspectRatio(contentMode: .fill)
-            } placeholder: { Color.sS3 }
+            RemoteArtworkView(urls: appState.artworkCandidates(for: ep), cornerRadius: 8)
             .frame(width: 48, height: 48)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(ep.title)
@@ -235,11 +258,8 @@ struct EpisodeDetailSheet: View {
                 VStack(alignment: .leading, spacing: 20) {
                     // Header
                     HStack(spacing: 14) {
-                        AsyncImage(url: URL(string: ep.artUrl)) { img in
-                            img.resizable().aspectRatio(contentMode: .fill)
-                        } placeholder: { Color.sS3 }
+                        RemoteArtworkView(urls: appState.artworkCandidates(for: ep), cornerRadius: 12)
                         .frame(width: 72, height: 72)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
 
                         VStack(alignment: .leading, spacing: 4) {
                             Text(ep.title)
@@ -298,16 +318,8 @@ struct EpisodeDetailSheet: View {
                     Divider().background(Color.sS2).padding(.horizontal)
 
                     if let notes = ep.descHtml ?? (ep.desc.isEmpty ? nil : ep.desc) {
-                        Group {
-                            if let attr = notes.notesAttributedString {
-                                Text(attr)
-                                    .tint(.sOrange)
-                                    .textSelection(.enabled)
-                            } else {
-                                Text(notes.strippingHTML).foregroundColor(.sDim)
-                            }
-                        }
-                        .font(.body)
+                        RichPodcastText(notes, font: .body, foreground: .sDim)
+                            .textSelection(.enabled)
                         .padding(.horizontal)
                     }
                 }

@@ -30,6 +30,8 @@ final class AppState {
     var isPlayerExpanded:  Bool                = false
     var toastMessage:      String              = ""
     var isShowingToast:    Bool                = false
+    var selectedTab:       Int                 = 0
+    var queueScrollTarget: String?
 
     private var toastTask: Task<Void, Never>?
 
@@ -45,6 +47,29 @@ final class AppState {
         return waypoints.first { $0.isSleep && $0.epId == ep.id }
     }
 
+    func artworkCandidates(for podcast: Podcast) -> [String] {
+        var candidates = [podcast.artUrl]
+        candidates.append(contentsOf: episodesFor(podcast.id).map(\.artUrl))
+        return dedupedNonEmpty(candidates)
+    }
+
+    func artworkCandidates(for episode: Episode) -> [String] {
+        var candidates = [episode.artUrl]
+        if let podcast = subscriptions.first(where: { $0.id == episode.podId }) {
+            candidates.append(podcast.artUrl)
+        }
+        return dedupedNonEmpty(candidates)
+    }
+
+    private func dedupedNonEmpty(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        return values.compactMap { value in
+            let cleaned = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !cleaned.isEmpty, seen.insert(cleaned).inserted else { return nil }
+            return cleaned
+        }
+    }
+
     // MARK: - Private
 
     private let player = AVPlayer()
@@ -54,6 +79,7 @@ final class AppState {
     private var didSetupAudio = false
     private var loadedEpisodeId: String?
     private var lastArtworkEpisodeId: String?
+    private var nowPlayingArtwork: MPMediaItemArtwork?
     private var lastSavedPositionBucket = -1
     private var shouldResumeAfterInterruption = false
 
@@ -68,6 +94,7 @@ final class AppState {
             options: [.allowAirPlay, .allowBluetoothHFP, .allowBluetoothA2DP]
         )
         try? AVAudioSession.sharedInstance().setActive(true)
+        UIApplication.shared.beginReceivingRemoteControlEvents()
         setupTimeObserver()
         setupRemoteCommands()
         NotificationCenter.default.addObserver(
@@ -116,6 +143,10 @@ final class AppState {
         let item = AVPlayerItem(url: url)
         player.replaceCurrentItem(with: item)
         loadedEpisodeId = ep.id
+        if lastArtworkEpisodeId != ep.id {
+            nowPlayingArtwork = nil
+            lastArtworkEpisodeId = nil
+        }
         lastSavedPositionBucket = -1
         let pos = startAt ?? savedPos[ep.id] ?? 0
         currentPos = pos
@@ -270,17 +301,25 @@ final class AppState {
             MPMediaItemPropertyArtist: ep.podName,
             MPNowPlayingInfoPropertyElapsedPlaybackTime: currentPos,
             MPNowPlayingInfoPropertyPlaybackRate: isPlaying ? Double(speed) : 0,
-            MPMediaItemPropertyPlaybackDuration: duration
+            MPNowPlayingInfoPropertyDefaultPlaybackRate: Double(speed),
+            MPMediaItemPropertyPlaybackDuration: duration,
+            MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue
         ]
+        if let nowPlayingArtwork {
+            info[MPMediaItemPropertyArtwork] = nowPlayingArtwork
+        }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
-        guard lastArtworkEpisodeId != ep.id else { return }
+        guard lastArtworkEpisodeId != ep.id, nowPlayingArtwork == nil else { return }
         lastArtworkEpisodeId = ep.id
         if let url = URL(string: ep.artUrl) {
-            Task.detached {
-                if let data = try? Data(contentsOf: url), let img = UIImage(data: data) {
+            let episodeId = ep.id
+            Task {
+                if let (data, _) = try? await URLSession.shared.data(from: url),
+                   let img = UIImage(data: data) {
                     let art = MPMediaItemArtwork(boundsSize: img.size) { _ in img }
-                    info[MPMediaItemPropertyArtwork] = art
-                    await MainActor.run { MPNowPlayingInfoCenter.default().nowPlayingInfo = info }
+                    guard currentEpisode?.id == episodeId else { return }
+                    nowPlayingArtwork = art
+                    updateNowPlaying()
                 }
             }
         }
@@ -295,17 +334,83 @@ final class AppState {
         cc.skipForwardCommand.isEnabled = true
         cc.skipForwardCommand.preferredIntervals = [30]
         cc.changePlaybackPositionCommand.isEnabled = true
-        cc.playCommand.addTarget  { [weak self] _ in DispatchQueue.main.async { self?.play() }; return .success }
-        cc.pauseCommand.addTarget { [weak self] _ in DispatchQueue.main.async { self?.pause() }; return .success }
-        cc.skipBackwardCommand.addTarget { [weak self] _ in DispatchQueue.main.async { self?.skipBack() }; return .success }
-        cc.skipForwardCommand.addTarget { [weak self] _ in DispatchQueue.main.async { self?.skipForward() }; return .success }
-        cc.nextTrackCommand.addTarget     { [weak self] _ in DispatchQueue.main.async { self?.nextTrack() };    return .success }
-        cc.previousTrackCommand.addTarget { [weak self] _ in DispatchQueue.main.async { self?.prevTrack() };    return .success }
+        cc.playCommand.addTarget  { [weak self] _ in self?.handleRemotePlay() ?? .commandFailed }
+        cc.pauseCommand.addTarget { [weak self] _ in self?.handleRemotePause() ?? .commandFailed }
+        cc.skipBackwardCommand.addTarget { [weak self] _ in self?.handleRemoteSkipBack() ?? .commandFailed }
+        cc.skipForwardCommand.addTarget { [weak self] _ in self?.handleRemoteSkipForward() ?? .commandFailed }
+        cc.nextTrackCommand.addTarget     { [weak self] _ in self?.handleRemoteNextTrack() ?? .commandFailed }
+        cc.previousTrackCommand.addTarget { [weak self] _ in self?.handleRemotePreviousTrack() ?? .commandFailed }
         cc.changePlaybackPositionCommand.addTarget { [weak self] event in
-            if let e = event as? MPChangePlaybackPositionCommandEvent {
-                DispatchQueue.main.async { self?.seek(to: e.positionTime) }
-            }
-            return .success
+            guard let self, let e = event as? MPChangePlaybackPositionCommandEvent else { return .commandFailed }
+            return self.handleRemoteSeek(to: e.positionTime)
+        }
+    }
+
+    private func performRemoteCommand(_ action: @escaping @MainActor () -> Bool) -> MPRemoteCommandHandlerStatus {
+        if Thread.isMainThread {
+            return action() ? .success : .commandFailed
+        }
+
+        var succeeded = false
+        DispatchQueue.main.sync {
+            succeeded = action()
+        }
+        return succeeded ? .success : .commandFailed
+    }
+
+    private func handleRemotePlay() -> MPRemoteCommandHandlerStatus {
+        performRemoteCommand {
+            guard self.currentEpisode != nil else { return false }
+            self.play()
+            return self.isPlaying
+        }
+    }
+
+    private func handleRemotePause() -> MPRemoteCommandHandlerStatus {
+        performRemoteCommand {
+            guard self.currentEpisode != nil else { return false }
+            self.pause()
+            return true
+        }
+    }
+
+    private func handleRemoteSkipBack() -> MPRemoteCommandHandlerStatus {
+        performRemoteCommand {
+            guard self.currentEpisode != nil else { return false }
+            self.skipBack()
+            return true
+        }
+    }
+
+    private func handleRemoteSkipForward() -> MPRemoteCommandHandlerStatus {
+        performRemoteCommand {
+            guard self.currentEpisode != nil else { return false }
+            self.skipForward()
+            return true
+        }
+    }
+
+    private func handleRemoteNextTrack() -> MPRemoteCommandHandlerStatus {
+        performRemoteCommand {
+            let oldId = self.currentEpisode?.id
+            self.nextTrack()
+            return self.currentEpisode?.id != nil && self.currentEpisode?.id != oldId
+        }
+    }
+
+    private func handleRemotePreviousTrack() -> MPRemoteCommandHandlerStatus {
+        performRemoteCommand {
+            guard self.currentEpisode != nil else { return false }
+            self.prevTrack()
+            return true
+        }
+    }
+
+    private func handleRemoteSeek(to position: TimeInterval) -> MPRemoteCommandHandlerStatus {
+        performRemoteCommand {
+            guard self.currentEpisode != nil else { return false }
+            self.seek(to: position)
+            return true
         }
     }
 
@@ -385,6 +490,13 @@ final class AppState {
         save()
     }
 
+    func updatePodcastDetails(_ podcast: Podcast) {
+        if let index = subscriptions.firstIndex(where: { $0.id == podcast.id }) {
+            subscriptions[index] = podcast
+            save()
+        }
+    }
+
     func unsubscribe(_ podId: String) {
         subscriptions.removeAll { $0.id == podId }
         library.removeValue(forKey: podId)
@@ -399,7 +511,13 @@ final class AppState {
         if isSubscribed(podcast.id) {
             library[podcast.id] = episodes
             if let i = subscriptions.firstIndex(where: { $0.id == podcast.id }) {
-                subscriptions[i] = podcast
+                var updated = podcast
+                if !episodes.isEmpty,
+                   let episodeArt = episodes.first(where: { !$0.artUrl.isEmpty })?.artUrl,
+                   updated.artUrl.isEmpty || updated.artUrl == subscriptions[i].artUrl {
+                    updated.artUrl = episodeArt
+                }
+                subscriptions[i] = updated
             }
             save()
         } else {
@@ -491,6 +609,10 @@ final class AppState {
 
     private static let saveURL = FileManager.default
         .urls(for: .documentDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("backtrack_v1.json")
+
+    private static let legacySaveURL = FileManager.default
+        .urls(for: .documentDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("sidetrack_v1.json")
 
     func save() {
@@ -506,7 +628,8 @@ final class AppState {
     }
 
     func load() {
-        guard let data = try? Data(contentsOf: Self.saveURL),
+        let url = FileManager.default.fileExists(atPath: Self.saveURL.path) ? Self.saveURL : Self.legacySaveURL
+        guard let data = try? Data(contentsOf: url),
               let s = try? JSONDecoder().decode(AppSnapshot.self, from: data) else { return }
         subscriptions = s.subscriptions; library  = s.library
         queue         = s.queue;         speed    = s.speed

@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct SidetrackApp: App {
+struct BacktrackApp: App {
     @State private var appState = AppState()
 
     var body: some Scene {

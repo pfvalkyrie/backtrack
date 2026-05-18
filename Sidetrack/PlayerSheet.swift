@@ -5,16 +5,25 @@ private let speedOptions: [Float] = [0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
 struct PlayerSheet: View {
     @Environment(AppState.self) private var appState
     @Binding var isExpanded: Bool
-    let namespace: Namespace.ID
     @State private var carouselPanel = 1  // 0 = chapters, 1 = artwork, 2 = notes
     @State private var dragY: CGFloat = 0
-    @GestureState private var activeDragY: CGFloat = 0
+    @State private var sheetHeight: CGFloat = 0
+    @GestureState(resetTransaction: Transaction(animation: .interactiveSpring(response: 0.28, dampingFraction: 0.84))) private var liveDragY: CGFloat = 0
 
     var body: some View {
         GeometryReader { geo in
             let cardSize = min(geo.size.width * 0.88, geo.size.height * 0.42, 360)
             ZStack(alignment: .top) {
-                Color.black.ignoresSafeArea()
+                LinearGradient(
+                    colors: [
+                        .black,
+                        Color.sS1.opacity(0.98),
+                        Color.sS2.opacity(0.96)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
                 VStack(spacing: 0) {
                     handle
                     Spacer(minLength: 0)
@@ -34,10 +43,11 @@ struct PlayerSheet: View {
                 .padding(.horizontal, 24)
             }
             .contentShape(Rectangle())
+            .onAppear { sheetHeight = geo.size.height + geo.safeAreaInsets.bottom + 80 }
         }
-        .offset(y: max(dragY, activeDragY))
+        .offset(y: max(dragY, liveDragY))
         .onChange(of: isExpanded) { _, _ in
-            dragY = 0
+            if isExpanded { dragY = 0 }
         }
     }
 
@@ -68,34 +78,92 @@ struct PlayerSheet: View {
     }
 
     private var dismissDrag: some Gesture {
-        DragGesture(minimumDistance: 12, coordinateSpace: .local)
-            .updating($activeDragY) { value, state, _ in
-                guard isDismissDrag(value) else { return }
-                state = value.translation.height
-            }
-            .onChanged { value in
-                guard isDismissDrag(value) else { return }
-                dragY = value.translation.height
+        DragGesture(minimumDistance: 10, coordinateSpace: .global)
+            .updating($liveDragY) { value, state, _ in
+                guard let translation = downwardDismissTranslation(value) else { return }
+                state = translation
             }
             .onEnded { value in
-                if isDismissDrag(value),
-                   value.translation.height > 36 || value.predictedEndTranslation.height > 90 {
-                    dismissPlayer()
+                if shouldFinishDismiss(value) {
+                    dragY = max(0, value.translation.height)
+                    dismissPlayer(continuingFromDrag: true)
                 } else {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) { dragY = 0 }
                 }
             }
     }
 
-    private func isDismissDrag(_ value: DragGesture.Value) -> Bool {
-        value.translation.height > 0 &&
-        abs(value.translation.height) > abs(value.translation.width) * 1.15
+    private var artworkDrag: some Gesture {
+        DragGesture(minimumDistance: 10, coordinateSpace: .global)
+            .updating($liveDragY) { value, state, _ in
+                guard let translation = downwardDismissTranslation(value) else { return }
+                state = translation
+            }
+            .onEnded { value in
+                if shouldFinishDismiss(value) {
+                    dragY = max(0, value.translation.height)
+                    dismissPlayer(continuingFromDrag: true)
+                } else if let targetPanel = artworkSwipeTarget(value) {
+                    withAnimation(.interactiveSpring(response: 0.32, dampingFraction: 0.88, blendDuration: 0.06)) {
+                        carouselPanel = targetPanel
+                        dragY = 0
+                    }
+                } else {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) { dragY = 0 }
+                }
+            }
     }
 
-    private func dismissPlayer() {
-        withAnimation(.spring(response: 0.42, dampingFraction: 0.88)) {
-            dragY = 0
-            isExpanded = false
+    private func downwardDismissTranslation(_ value: DragGesture.Value) -> CGFloat? {
+        let vertical = value.translation.height
+        let horizontal = abs(value.translation.width)
+        guard vertical > 0 else { return nil }
+        guard vertical > 10 || horizontal > 10 else { return nil }
+        guard vertical > horizontal * 1.18 else { return nil }
+        return vertical
+    }
+
+    private func shouldFinishDismiss(_ value: DragGesture.Value) -> Bool {
+        guard downwardDismissTranslation(value) != nil else { return false }
+        let predicted = max(value.translation.height, value.predictedEndTranslation.height)
+        return value.translation.height > 72 || predicted > 160
+    }
+
+    private func artworkSwipeTarget(_ value: DragGesture.Value) -> Int? {
+        let width = value.translation.width
+        let predictedWidth = value.predictedEndTranslation.width
+        let horizontal = max(abs(width), abs(predictedWidth))
+        let vertical = abs(value.translation.height)
+        guard horizontal > 42 || abs(predictedWidth) > 96 else { return nil }
+        guard horizontal > vertical * 1.12 else { return nil }
+        return predictedWidth < 0 || width < 0 ? 2 : 0
+    }
+
+    private func dismissPlayer(continuingFromDrag: Bool = false) {
+        if continuingFromDrag {
+            withAnimation(.easeOut(duration: 0.18)) {
+                dragY = max(sheetHeight, 700)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    isExpanded = false
+                    dragY = 0
+                }
+            }
+        } else {
+            withAnimation(.interactiveSpring(response: 0.32, dampingFraction: 0.9, blendDuration: 0.08)) {
+                dragY = max(sheetHeight, 700)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    isExpanded = false
+                    dragY = 0
+                }
+            }
         }
     }
 
@@ -110,7 +178,12 @@ struct PlayerSheet: View {
         .tabViewStyle(.page(indexDisplayMode: .never))
         .frame(width: cardSize, height: cardSize)
         .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: .black.opacity(0.55), radius: 20, y: 8)
+        .overlay(
+            RoundedRectangle(cornerRadius: 20)
+                .stroke(.white.opacity(0.14), lineWidth: 0.8)
+        )
+        .shadow(color: .sOrange.opacity(0.12), radius: 18, y: 5)
+        .shadow(color: .black.opacity(0.55), radius: 24, y: 10)
     }
 
     // MARK: - Artwork pane
@@ -118,20 +191,17 @@ struct PlayerSheet: View {
     func artPane(cardSize: CGFloat) -> some View {
         Group {
             if let ep = appState.currentEpisode {
-                AsyncImage(url: URL(string: ep.artUrl)) { img in
-                    img.resizable().aspectRatio(contentMode: .fill)
-                } placeholder: { Color.sS3 }
-                .scaleEffect(appState.isPlaying ? 1.0 : 0.92)
-                .animation(.spring(duration: 0.4), value: appState.isPlaying)
+                RemoteArtworkView(urls: appState.artworkCandidates(for: ep), cornerRadius: 20)
+                    .scaleEffect(appState.isPlaying ? 1.0 : 0.92)
+                    .animation(.spring(duration: 0.4), value: appState.isPlaying)
             } else {
                 Color.sS3
             }
         }
         .frame(width: cardSize, height: cardSize)
         .clipShape(RoundedRectangle(cornerRadius: 20))
-        .matchedGeometryEffect(id: "playerArtwork", in: namespace)
         .contentShape(RoundedRectangle(cornerRadius: 20))
-        .simultaneousGesture(dismissDrag)
+        .gesture(artworkDrag, including: .gesture)
     }
 
     // MARK: - Chapters pane
@@ -144,7 +214,7 @@ struct PlayerSheet: View {
         case .loading:
             ProgressView().tint(.sOrange)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.sS1)
+                .background(.ultraThinMaterial)
         case .failed:
             placeholderLabel("Couldn't load")
         case .loaded(let chapters):
@@ -158,12 +228,12 @@ struct PlayerSheet: View {
                         }
                     }
                 }
-                .background(Color.sS1)
                 .onChange(of: carouselPanel) { _, new in
                     if new == 0, let ch = chapters.first(where: { isCurrent($0) }) {
                         withAnimation { proxy.scrollTo(ch.id, anchor: .center) }
                     }
                 }
+                .background(.ultraThinMaterial)
             }
         }
     }
@@ -220,7 +290,7 @@ struct PlayerSheet: View {
             .padding(.vertical, 9)
             .contentShape(Rectangle())
             .onTapGesture { appState.seek(to: ch.startTime) }
-            Divider().background(Color.sS3)
+            Divider().background(Color.white.opacity(0.08))
         }
     }
 
@@ -232,26 +302,14 @@ struct PlayerSheet: View {
             let text = ep.descHtml ?? ep.desc
             if text.isEmpty {
                 placeholderLabel("No show notes")
-            } else if let attr = text.notesAttributedString {
+            } else {
                 ScrollView {
-                    Text(attr)
-                        .font(.system(size: 13))
-                        .foregroundColor(.white)
-                        .tint(.sOrange)
+                    RichPodcastText(text, font: .system(size: 13), foreground: .white)
                         .textSelection(.enabled)
                         .padding(14)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .background(Color.sS1)
-            } else {
-                ScrollView {
-                    Text(text.strippingHTML)
-                        .font(.system(size: 13))
-                        .foregroundColor(.sDim)
-                        .padding(14)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .background(Color.sS1)
+                .background(.ultraThinMaterial)
             }
         }
     }
@@ -260,7 +318,7 @@ struct PlayerSheet: View {
         Text(s)
             .font(.subheadline).foregroundColor(.sDim)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color.sS1)
+            .background(.ultraThinMaterial)
     }
 
     // MARK: - Dots
@@ -282,20 +340,28 @@ struct PlayerSheet: View {
 
     // MARK: - Title
 
+    @ViewBuilder
     var titleSection: some View {
-        VStack(spacing: 4) {
-            if let ep = appState.currentEpisode {
-                Text(ep.title)
-                    .font(.system(size: 17, weight: .bold))
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
-                    .matchedGeometryEffect(id: "playerTitle", in: namespace, properties: .position)
-                Text(ep.podName)
-                    .font(.system(size: 13))
-                    .foregroundColor(.sDim)
+        if let ep = appState.currentEpisode {
+            Button {
+                showCurrentEpisodeInQueue(ep)
+            } label: {
+                VStack(spacing: 4) {
+                    Text(ep.title)
+                        .font(.system(size: 17, weight: .bold))
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                    Text(ep.podName)
+                        .font(.system(size: 13))
+                        .foregroundColor(.sDim)
+                }
+                .frame(maxWidth: .infinity)
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Show current episode in queue")
+        } else {
+            EmptyView()
         }
-        .frame(maxWidth: .infinity)
     }
 
     // MARK: - Scrubber
@@ -367,13 +433,13 @@ struct PlayerSheet: View {
                             .foregroundColor(appState.speed == s ? .black : .sDim)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 7)
-                            .background(appState.speed == s ? Color.sOrange : Color.sS2)
+                            .background(appState.speed == s ? Color.sOrange : Color.white.opacity(0.06))
                     }
                     .buttonStyle(.plain)
                 }
             }
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.sS3, lineWidth: 0.5))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .glassSurface(cornerRadius: 10, tintOpacity: 0.34)
 
             HStack(spacing: 12) {
                 Spacer()
@@ -388,8 +454,7 @@ struct PlayerSheet: View {
                         }
                         .foregroundColor(.sDim)
                         .padding(.horizontal, 12).padding(.vertical, 7)
-                        .background(Color.sS2)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .glassSurface(cornerRadius: 10, tintOpacity: 0.42)
                     }
                     .buttonStyle(.plain)
                 }
@@ -402,8 +467,7 @@ struct PlayerSheet: View {
                     .foregroundColor(appState.sleepMinutes > 0
                                      ? Color(red: 0.96, green: 0.72, blue: 0.24) : .sDim)
                     .padding(.horizontal, 12).padding(.vertical, 7)
-                    .background(Color.sS2)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .glassSurface(cornerRadius: 10, tintOpacity: 0.42)
                 }
                 .buttonStyle(.plain)
                 Spacer()
@@ -417,5 +481,18 @@ struct PlayerSheet: View {
         let pos = appState.currentPos
         if let end = ch.endTime { return pos >= ch.startTime && pos < end }
         return pos >= ch.startTime
+    }
+
+    private func showCurrentEpisodeInQueue(_ ep: Episode) {
+        withAnimation(.spring(response: 0.42, dampingFraction: 0.9)) {
+            isExpanded = false
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
+            appState.selectedTab = 0
+            appState.queueScrollTarget = nil
+            DispatchQueue.main.async {
+                appState.queueScrollTarget = ep.id
+            }
+        }
     }
 }

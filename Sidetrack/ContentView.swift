@@ -2,11 +2,10 @@ import SwiftUI
 
 struct ContentView: View {
     @Environment(AppState.self) private var appState
-    @State private var selectedTab = 0
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            TabView(selection: $selectedTab) {
+            TabView(selection: Bindable(appState).selectedTab) {
                 QueueView()
                     .tabItem { Label("Queue",     systemImage: "list.number") }
                     .tag(0)

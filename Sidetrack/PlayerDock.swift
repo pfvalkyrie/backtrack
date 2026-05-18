@@ -3,17 +3,16 @@ import SwiftUI
 struct PlayerDock: View {
     @Environment(AppState.self) private var appState
     @State private var isExpanded = false
-    @Namespace private var playerTransition
 
     var body: some View {
         GeometryReader { geo in
             ZStack(alignment: .bottom) {
                 if isExpanded {
-                    PlayerSheet(isExpanded: $isExpanded, namespace: playerTransition)
+                    PlayerSheet(isExpanded: $isExpanded)
                         .ignoresSafeArea()
                         .transition(.asymmetric(
                             insertion: .opacity.combined(with: .move(edge: .bottom)),
-                            removal: .opacity.combined(with: .move(edge: .bottom))
+                            removal: .move(edge: .bottom)
                         ))
                         .zIndex(2)
                 }
@@ -45,19 +44,14 @@ struct PlayerDock: View {
         if let ep = appState.currentEpisode {
             VStack(spacing: 0) {
                 HStack(spacing: 12) {
-                    AsyncImage(url: URL(string: ep.artUrl)) { img in
-                        img.resizable().aspectRatio(contentMode: .fill)
-                    } placeholder: { Color.sS3 }
+                    RemoteArtworkView(urls: appState.artworkCandidates(for: ep), cornerRadius: 10)
                     .frame(width: 44, height: 44)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .matchedGeometryEffect(id: "playerArtwork", in: playerTransition)
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text(ep.title)
                             .font(.system(size: 14, weight: .semibold))
                             .lineLimit(1)
                             .foregroundColor(.white)
-                            .matchedGeometryEffect(id: "playerTitle", in: playerTransition, properties: .position)
                         Text(ep.podName)
                             .font(.system(size: 12))
                             .foregroundColor(.sDim)
@@ -113,14 +107,23 @@ struct PlayerDock: View {
             }
             .background(
                 RoundedRectangle(cornerRadius: 18)
-                    .fill(Color.sS1.opacity(0.97))
+                    .fill(.ultraThinMaterial)
+                    .overlay(RoundedRectangle(cornerRadius: 18).fill(Color.sS1.opacity(0.76)))
                     .overlay(
                         RoundedRectangle(cornerRadius: 18)
-                            .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
+                            .stroke(
+                                LinearGradient(
+                                    colors: [.white.opacity(0.24), .white.opacity(0.06), .sOrange.opacity(0.2)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 0.8
+                            )
                     )
             )
             .contentShape(RoundedRectangle(cornerRadius: 18))
-            .shadow(color: .black.opacity(0.55), radius: 20, y: 6)
+            .shadow(color: .sOrange.opacity(0.14), radius: 18, y: 4)
+            .shadow(color: .black.opacity(0.55), radius: 22, y: 8)
             .onTapGesture {
                 withAnimation(.spring(response: 0.48, dampingFraction: 0.88)) {
                     isExpanded = true

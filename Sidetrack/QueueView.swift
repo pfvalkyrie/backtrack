@@ -33,30 +33,53 @@ struct QueueView: View {
     }
 
     var queueList: some View {
-        List {
-            ForEach(Array(appState.queue.enumerated()), id: \.element.id) { idx, ep in
-                QueueRow(ep: ep, idx: idx, isCurrent: idx == appState.queueIndex)
-                    .listRowBackground(
-                        Group {
-                            if idx == appState.queueIndex {
-                                Color.sS2.overlay(
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .stroke(Color.sOrange.opacity(0.5), lineWidth: 1.5)
-                                )
-                            } else {
-                                Color.sS1
+        ScrollViewReader { proxy in
+            List {
+                ForEach(Array(appState.queue.enumerated()), id: \.element.id) { idx, ep in
+                    QueueRow(ep: ep, idx: idx, isCurrent: idx == appState.queueIndex)
+                        .id(ep.id)
+                        .listRowBackground(
+                            Group {
+                                if idx == appState.queueIndex {
+                                    Color.sS2.overlay(
+                                        RoundedRectangle(cornerRadius: 16)
+                                            .stroke(Color.sOrange.opacity(0.5), lineWidth: 1.5)
+                                    )
+                                } else {
+                                    Color.sS1
+                                }
                             }
-                        }
-                    )
-                    .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12))
-                    .listRowSeparator(.hidden)
+                        )
+                        .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12))
+                        .listRowSeparator(.hidden)
+                }
+                .onMove { appState.moveQueue(from: $0, to: $1) }
+                .onDelete { idx in idx.sorted().reversed().forEach { appState.removeFromQueue(at: $0) } }
             }
-            .onMove { appState.moveQueue(from: $0, to: $1) }
-            .onDelete { idx in idx.sorted().reversed().forEach { appState.removeFromQueue(at: $0) } }
+            .listStyle(.plain)
+            .background(Color.black)
+            .scrollContentBackground(.hidden)
+            .onAppear {
+                scrollToCurrent(proxy)
+            }
+            .onChange(of: appState.queueScrollTarget) { _, _ in
+                scrollToCurrent(proxy)
+            }
+            .onChange(of: appState.selectedTab) { _, newValue in
+                if newValue == 0 {
+                    scrollToCurrent(proxy)
+                }
+            }
         }
-        .listStyle(.plain)
-        .background(Color.black)
-        .scrollContentBackground(.hidden)
+    }
+
+    private func scrollToCurrent(_ proxy: ScrollViewProxy) {
+        guard let ep = appState.currentEpisode else { return }
+        DispatchQueue.main.async {
+            withAnimation(.spring(response: 0.36, dampingFraction: 0.88)) {
+                proxy.scrollTo(ep.id, anchor: .center)
+            }
+        }
     }
 
     var emptyState: some View {

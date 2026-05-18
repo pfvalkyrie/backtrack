@@ -14,6 +14,8 @@ struct LibraryView: View {
         .navigationTitle("Library")
         .background(Color.black)
         .scrollContentBackground(.hidden)
+        .task { await fillMissingPodcastDescriptions() }
+        .refreshable { await refreshLibrary() }
     }
 
     var list: some View {
@@ -22,7 +24,15 @@ struct LibraryView: View {
                 NavigationLink(destination: EpisodesView(podcast: podcast)) {
                     LibraryRow(podcast: podcast)
                 }
-                .listRowBackground(Color.sS1)
+                .listRowBackground(
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(.ultraThinMaterial)
+                        .overlay(RoundedRectangle(cornerRadius: 16).fill(Color.sS1.opacity(0.72)))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16)
+                                .stroke(.white.opacity(0.1), lineWidth: 0.6)
+                        )
+                )
                 .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12))
                 .listRowSeparator(.hidden)
             }
@@ -42,41 +52,43 @@ struct LibraryView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
+
+    func fillMissingPodcastDescriptions() async {
+        let missing = appState.subscriptions.filter { $0.desc.isEmpty || $0.artUrl.isEmpty }
+        for podcast in missing {
+            guard let detailed = try? await FeedService.fetchPodcastDetails(podcast: podcast) else { continue }
+            appState.updatePodcastDetails(detailed)
+        }
+    }
+
+    func refreshLibrary() async {
+        for podcast in appState.subscriptions {
+            let detailed = (try? await FeedService.fetchPodcastDetails(podcast: podcast)) ?? podcast
+            appState.updatePodcastDetails(detailed)
+            if let episodes = try? await FeedService.fetchFeed(podcast: detailed) {
+                appState.storeFeed(episodes, for: detailed)
+            }
+        }
+    }
 }
 
 private struct LibraryRow: View {
     @Environment(AppState.self) private var appState
     let podcast: Podcast
 
-    var episodeCount: Int { appState.episodesFor(podcast.id).count }
-
     var body: some View {
         HStack(spacing: 12) {
-            AsyncImage(url: URL(string: podcast.artUrl)) { img in
-                img.resizable().aspectRatio(contentMode: .fill)
-            } placeholder: { Color.sS3 }
+            RemoteArtworkView(urls: appState.artworkCandidates(for: podcast), cornerRadius: 12)
             .frame(width: 62, height: 62)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(podcast.name)
-                    .font(.system(size: 14, weight: .bold))
+                    .font(.system(size: 15, weight: .bold))
                     .lineLimit(2)
                     .foregroundColor(.white)
-                if !podcast.author.isEmpty {
-                    Text(podcast.author)
-                        .font(.system(size: 12))
-                        .foregroundColor(.sDim)
-                        .lineLimit(1)
-                }
-                if episodeCount > 0 {
-                    Text("\(episodeCount) episodes")
-                        .font(.system(size: 11))
-                        .foregroundColor(.sMuted)
-                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 8)
     }
 }
