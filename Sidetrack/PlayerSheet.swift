@@ -122,12 +122,11 @@ struct PlayerSheet: View {
                     resetArtworkDrag(disablesAnimation: true)
                     dismissPlayer(continuingFromDrag: true)
                 } else if let targetPanel = artworkDragTarget(value, cardSize: cardSize) {
+                    syncArtworkDragToFinalFingerPosition(value, cardSize: cardSize)
                     finishArtworkSwipe(to: targetPanel, cardSize: cardSize)
                 } else {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
-                        resetArtworkDrag()
-                        dragY = 0
-                    }
+                    syncArtworkDragToFinalFingerPosition(value, cardSize: cardSize)
+                    cancelArtworkSwipe(cardSize: cardSize)
                 }
             }
     }
@@ -177,6 +176,17 @@ struct PlayerSheet: View {
         min(cardSize * 1.05, max(-cardSize * 1.05, value))
     }
 
+    private func syncArtworkDragToFinalFingerPosition(_ value: DragGesture.Value, cardSize: CGFloat) {
+        guard artworkDragAxis == .horizontal || resolvedArtworkDragAxis(value) == .horizontal else { return }
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            artworkDragAxis = .horizontal
+            artworkDragX = constrainedArtworkDragX(value.translation.width, cardSize: cardSize)
+            artworkPreviewTarget = artworkDragX < 0 ? 2 : 0
+        }
+    }
+
     private func finishArtworkSwipe(to targetPanel: Int, cardSize: CGFloat) {
         let finalOffset = targetPanel == 0 ? cardSize : -cardSize
         let remainingDistance = abs(finalOffset - artworkDragX)
@@ -197,6 +207,29 @@ struct PlayerSheet: View {
                 resetArtworkDrag()
                 dragY = 0
             }
+        }
+    }
+
+    private func cancelArtworkSwipe(cardSize: CGFloat) {
+        guard artworkDragAxis == .horizontal, artworkPreviewTarget != nil else {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+                resetArtworkDrag()
+                dragY = 0
+            }
+            return
+        }
+
+        let returnDistance = abs(artworkDragX)
+        let returnProgress = returnDistance / max(cardSize, 1)
+        let settleDuration = min(0.52, max(0.32, 0.26 + returnProgress * 0.26))
+
+        withAnimation(.easeInOut(duration: settleDuration)) {
+            artworkDragX = 0
+            dragY = 0
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + settleDuration + 0.08) {
+            resetArtworkDrag(disablesAnimation: true)
         }
     }
 
@@ -246,13 +279,20 @@ struct PlayerSheet: View {
 
     // MARK: - Carousel (Chapters | Artwork | Notes)
 
+    @ViewBuilder
     func carousel(cardSize: CGFloat) -> some View {
-        TabView(selection: $carouselPanel) {
-            chaptersPane.tag(0)
-            artPane(cardSize: cardSize).tag(1)
-            notesPane.tag(2)
+        Group {
+            if carouselPanel == 1 {
+                artPane(cardSize: cardSize)
+            } else {
+                TabView(selection: $carouselPanel) {
+                    chaptersPane.tag(0)
+                    artPane(cardSize: cardSize).tag(1)
+                    notesPane.tag(2)
+                }
+                .tabViewStyle(.page(indexDisplayMode: .never))
+            }
         }
-        .tabViewStyle(.page(indexDisplayMode: .never))
         .frame(width: cardSize, height: cardSize)
         .clipShape(RoundedRectangle(cornerRadius: 20))
         .overlay(
