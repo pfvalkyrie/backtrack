@@ -122,11 +122,7 @@ struct PlayerSheet: View {
                     resetArtworkDrag(disablesAnimation: true)
                     dismissPlayer(continuingFromDrag: true)
                 } else if let targetPanel = artworkSwipeTarget(value) {
-                    withAnimation(.interactiveSpring(response: 0.32, dampingFraction: 0.88, blendDuration: 0.06)) {
-                        carouselPanel = targetPanel
-                        resetArtworkDrag()
-                        dragY = 0
-                    }
+                    finishArtworkSwipe(to: targetPanel, cardSize: cardSize)
                 } else {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
                         resetArtworkDrag()
@@ -179,6 +175,27 @@ struct PlayerSheet: View {
 
     private func constrainedArtworkDragX(_ value: CGFloat, cardSize: CGFloat) -> CGFloat {
         min(cardSize * 1.05, max(-cardSize * 1.05, value))
+    }
+
+    private func finishArtworkSwipe(to targetPanel: Int, cardSize: CGFloat) {
+        let finalOffset = targetPanel == 0 ? cardSize : -cardSize
+        let settleDuration = 0.18
+
+        withAnimation(.easeOut(duration: settleDuration)) {
+            artworkDragX = finalOffset
+            artworkPreviewTarget = targetPanel
+            dragY = 0
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + settleDuration) {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                carouselPanel = targetPanel
+                resetArtworkDrag()
+                dragY = 0
+            }
+        }
     }
 
     private func resetArtworkDrag(disablesAnimation: Bool = false) {
@@ -268,7 +285,7 @@ struct PlayerSheet: View {
         .frame(width: cardSize, height: cardSize)
         .clipShape(RoundedRectangle(cornerRadius: 20))
         .contentShape(RoundedRectangle(cornerRadius: 20))
-        .gesture(artworkDrag(cardSize: cardSize), including: .gesture)
+        .highPriorityGesture(artworkDrag(cardSize: cardSize), including: .gesture)
     }
 
     @ViewBuilder
