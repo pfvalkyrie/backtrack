@@ -2431,6 +2431,7 @@ function seekToChapter(startTime) {
 let artSwipe = null, carouselPanel = 1; // 0=chapters, 1=artwork, 2=notes
 const artSlider = document.getElementById('art-slider');
 const artWrap = artSlider.parentElement;
+artWrap.style.touchAction = 'none'; // artwork panel is default; updated per panel in setCarouselPanel
 
 function setCarouselPanel(index, animate = true) {
   const W = artWrap.offsetWidth;
@@ -2438,6 +2439,7 @@ function setCarouselPanel(index, animate = true) {
   artSlider.style.transition = animate ? 'transform 0.35s cubic-bezier(0.32,0.72,0,1)' : 'none';
   artSlider.style.transform = `translateX(${-index * W}px)`;
   carouselPanel = index;
+  artWrap.style.touchAction = index === 1 ? 'none' : 'pan-y';
   document.getElementById('art-dot-0').classList.toggle('on', index === 0);
   document.getElementById('art-dot-1').classList.toggle('on', index === 1);
   document.getElementById('art-dot-2').classList.toggle('on', index === 2);
@@ -2479,6 +2481,7 @@ artWrap.addEventListener('touchmove', e => {
     } else {
       if (!isDesktop() && dy > 0 && dy > Math.abs(dx) * 1.2) {
         artSwipe.active = true; artSwipe.mode = 'dismiss';
+        artSwipe.commitY = e.touches[0].clientY; // offset origin so translateY starts from 0
       } else if (Math.abs(dx) > Math.abs(dy) * 0.8) {
         artSwipe.active = true; artSwipe.mode = 'carousel';
       } else {
@@ -2487,7 +2490,8 @@ artWrap.addEventListener('touchmove', e => {
     }
   }
   if (artSwipe.mode === 'dismiss') {
-    fullPlayer.style.transform = `translateY(${Math.max(0, dy)}px)`;
+    const visualDy = e.touches[0].clientY - artSwipe.commitY;
+    fullPlayer.style.transform = `translateY(${Math.max(0, visualDy)}px)`;
   } else {
     const W = artWrap.offsetWidth;
     const base = -carouselPanel * W;
@@ -2506,11 +2510,11 @@ artWrap.addEventListener('touchend', e => {
     return;
   }
   if (artSwipe.mode === 'dismiss') {
-    const dy = e.changedTouches[0].clientY - artSwipe.startY;
+    const dy = e.changedTouches[0].clientY - artSwipe.commitY;
     artSwipe = null;
     fullPlayer.style.transition = '';
     fullPlayer.style.transform = '';
-    if (dy > 80) closePlayer();
+    if (dy > 70) closePlayer();
   } else {
     const dx = e.changedTouches[0].clientX - artSwipe.startX;
     artSwipe = null;
